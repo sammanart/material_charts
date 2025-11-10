@@ -73,35 +73,6 @@ class CandlestickChartPainter extends CustomPainter {
   /// - Labels
   @override
   void paint(Canvas canvas, Size size) {
-    // Draw the vertical line and check for candle tooltip
-    if (hoverPosition != null) {
-      final chartArea = Rect.fromLTWH(
-        padding.left + axisConfig.yAxisWidth,
-        padding.top,
-        size.width - padding.horizontal - axisConfig.yAxisWidth,
-        size.height - padding.vertical - axisConfig.xAxisHeight,
-      );
-      final verticalLineX = hoverPosition!.dx;
-
-      final verticalLinePaint = Paint()
-        ..color = style.verticalLineColor
-        ..strokeWidth = style.verticalLineWidth;
-
-      // Draw the vertical line
-      canvas.drawLine(
-        Offset(verticalLineX, chartArea.top),
-        Offset(verticalLineX, chartArea.bottom),
-        verticalLinePaint,
-      );
-
-      // Check if we are hovering over a candle
-      final candleIndex = _getCandleIndexAtPosition(verticalLineX, chartArea);
-      if (candleIndex != null) {
-        // Draw the tooltip if hovering over a candle
-        _drawTooltip(canvas, chartArea, candleIndex);
-      }
-    }
-
     if (data.isEmpty) return;
 
     final chartArea = Rect.fromLTWH(
@@ -119,11 +90,35 @@ class CandlestickChartPainter extends CustomPainter {
     if (showGrid) _drawGrid(canvas, chartArea);
     _drawCandlesticks(canvas, chartArea);
 
+    // Draw the vertical line if hovering
+    if (hoverPosition != null) {
+      final verticalLineX = hoverPosition!.dx;
+
+      final verticalLinePaint = Paint()
+        ..color = style.verticalLineColor
+        ..strokeWidth = style.verticalLineWidth;
+
+      // Draw the vertical line
+      canvas.drawLine(
+        Offset(verticalLineX, chartArea.top),
+        Offset(verticalLineX, chartArea.bottom),
+        verticalLinePaint,
+      );
+    }
+
     canvas.restore();
 
     // Draw axes labels outside the clipped area
     _drawYAxisLabels(canvas, chartArea);
     _drawXAxisLabels(canvas, chartArea);
+
+    // Draw the tooltip on top of everything
+    if (hoverPosition != null) {
+      final candleIndex = _getCandleIndexAtPosition(hoverPosition!.dx, chartArea);
+      if (candleIndex != null) {
+        _drawTooltip(canvas, chartArea, candleIndex);
+      }
+    }
   }
 
   /// Determines which candle is being hovered over based on x-coordinate
