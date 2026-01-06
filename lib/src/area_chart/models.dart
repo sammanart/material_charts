@@ -234,6 +234,7 @@ class AreaChartStyle {
   final String? title; // Chart title from Plotly layout
   final String? xAxisTitle; // X-axis title from Plotly layout
   final String? yAxisTitle; // Y-axis title from Plotly layout
+  final AreaCrosshairConfig? crosshair; // Optional crosshair configuration //adding code
 
   /// Creates an instance of `AreaChartStyle` with default or custom properties.
   const AreaChartStyle({
@@ -253,6 +254,7 @@ class AreaChartStyle {
     this.title,
     this.xAxisTitle,
     this.yAxisTitle,
+    this.crosshair,//adding code
   });
 
   /// Creates an `AreaChartStyle` from a Plotly layout object.
@@ -293,6 +295,23 @@ class AreaChartStyle {
       gridColor: gridColor,
     );
   }
+}
+
+/// Configures the crosshair behavior for the area chart.
+class AreaCrosshairConfig {//adding code
+  final Color lineColor; // Color of the crosshair lines
+  final double lineWidth; // Width of the crosshair lines
+  final bool enabled; // Whether crosshair is enabled
+  final bool showLabel; // Whether to show labels for crosshair
+  final TextStyle? labelStyle; // Optional label style
+
+  const AreaCrosshairConfig({//adding code
+    this.lineColor = Colors.grey,
+    this.lineWidth = 1.0,
+    this.enabled = false,
+    this.showLabel = true,
+    this.labelStyle,
+  });
 }
 
 /// Utility class for parsing complete Plotly JSON format

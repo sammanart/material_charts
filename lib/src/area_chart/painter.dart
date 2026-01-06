@@ -10,8 +10,7 @@ class AreaChartPainter extends CustomPainter {
   final List<AreaChartSeries> series; // List of data series to render.
   final double progress; // Animation progress (0.0 to 1.0).
   final AreaChartStyle style; // Style configuration for the chart.
-  final Offset?
-      tooltipPosition; // Position of the cursor or hover for tooltips.
+  final Offset? tooltipPosition; // Position of the cursor or hover for tooltips.
 
   AreaChartPainter({
     required this.series,
@@ -35,11 +34,10 @@ class AreaChartPainter extends CustomPainter {
       final seriesData = series[i];
       // Get the colors for the series (fallback to default style colors if not defined).
       final color = seriesData.color ?? style.colors[i % style.colors.length];
-      final gradientColor =
-          seriesData.gradientColor ?? color.withValues(alpha: 0.2);
+      final gradientColor = color.withValues(alpha: 0.0); //adding code, making it more transparent
 
       // Draw the area below the line for the series.
-      _drawArea(canvas, chartArea, seriesData, color, gradientColor);
+      _drawArea(canvas, chartArea, seriesData, color.withValues(alpha: 0.2), gradientColor); //adding code,making it start transparent
 
       // Draw the line connecting the data points.
       _drawLine(canvas, chartArea, seriesData, color);
@@ -49,6 +47,11 @@ class AreaChartPainter extends CustomPainter {
         _drawPoints(canvas, chartArea, seriesData, color);
       }
     }
+
+    // Draw crosshair if enabled and a hover position is available //adding code
+    if (style.crosshair?.enabled == true && tooltipPosition != null) { //adding code
+      _drawCrosshair(canvas, chartArea);//adding code
+    }//adding code
   }
 
   /// Draws the filled area below the line of the chart.
@@ -148,8 +151,7 @@ class AreaChartPainter extends CustomPainter {
     Color color,
   ) {
     final points = _getSeriesPoints(chartArea, seriesData);
-    final progressPoints = (points.length * progress)
-        .floor(); // Limit points based on animation progress.
+    final progressPoints = (points.length * progress).floor(); // Limit points based on animation progress.
     final pointSize = seriesData.pointSize ?? style.defaultPointSize;
 
     // Use default tooltip configuration if series-specific config is not available.
@@ -159,8 +161,7 @@ class AreaChartPainter extends CustomPainter {
     // Iterate through the visible points.
     for (int i = 0; i < progressPoints; i++) {
       final dataPoint = seriesData.dataPoints[i];
-      final tooltipConfig = dataPoint.tooltipConfig ??
-          seriesTooltip; // Use point-specific config or fallback.
+      final tooltipConfig = dataPoint.tooltipConfig ?? seriesTooltip; // Use point-specific config or fallback.
 
       // Draw the data point as a filled circle.
       final pointPaint = Paint()
@@ -202,8 +203,7 @@ class AreaChartPainter extends CustomPainter {
     Rect chartArea,
     TooltipConfig config,
   ) {
-    final text = config.text ??
-        '$seriesName: ${dataPoint.value.toStringAsFixed(1)}'; // Generate tooltip text.
+    final text = config.text ?? '$seriesName: ${dataPoint.value.toStringAsFixed(1)}'; // Generate tooltip text.
     final textSpan = TextSpan(text: text, style: config.textStyle);
 
     final textPainter = TextPainter(
@@ -251,11 +251,10 @@ class AreaChartPainter extends CustomPainter {
 
     // Horizontal grid lines and labels.
     for (int i = 0; i <= style.horizontalGridLines; i++) {
-      final y =
-          chartArea.top + (chartArea.height / style.horizontalGridLines) * i;
+      final y = chartArea.top + (chartArea.height / style.horizontalGridLines) * i;
       canvas.drawLine(
         Offset(chartArea.left, y),
-        Offset(chartArea.right, y),
+        Offset(chartArea.right + 25, y), //adding code, allows to have a longer horizontal line where the stats can rest.
         paint,
       );
 
@@ -267,8 +266,7 @@ class AreaChartPainter extends CustomPainter {
 
         final textSpan = TextSpan(
           text: value.toStringAsFixed(1),
-          style: style.labelStyle ??
-              TextStyle(color: style.gridColor, fontSize: 10),
+          style: style.labelStyle ?? TextStyle(color: style.gridColor, fontSize: 10),
         );
         final textPainter = TextPainter(
           text: textSpan,
@@ -278,8 +276,9 @@ class AreaChartPainter extends CustomPainter {
         textPainter.paint(
           canvas,
           Offset(
-            chartArea.left - textPainter.width - 5,
-            y - textPainter.height / 2,
+            //CURRENT CHANGES
+            chartArea.right + 25, //adding code, make the y axis label more to the right
+            y - textPainter.height / 2, //is only the height of the number
           ),
         );
       }
@@ -289,29 +288,32 @@ class AreaChartPainter extends CustomPainter {
     if (series.isNotEmpty && series[0].dataPoints.isNotEmpty) {
       final pointCount = series[0].dataPoints.length;
       for (int i = 0; i < pointCount; i++) {
-        final x = _getXCoordinate(chartArea, i, pointCount);
-        canvas.drawLine(
-          Offset(x, chartArea.top),
-          Offset(x, chartArea.bottom),
-          paint,
-        );
-
-        final label = series[0].dataPoints[i].label;
-        if (label != null) {
-          final textSpan = TextSpan(
-            text: label,
-            style: style.labelStyle ??
-                TextStyle(color: style.gridColor, fontSize: 10),
+        if (series[0].dataPoints.elementAt(i).label != null && series[0].dataPoints.elementAt(i).label != "") {
+          //adding code, this condition allows a vertical line to be drawn ONLY if the data point has a label or an empty string.
+          //It will STILL display if you put a space " ". So you have a way to display a VERTICAL LINE WITHOUT TEXT.
+          final x = _getXCoordinate(chartArea, i, pointCount);
+          canvas.drawLine(
+            Offset(x, chartArea.top),
+            Offset(x, chartArea.bottom),
+            paint,
           );
-          final textPainter = TextPainter(
-            text: textSpan,
-            textDirection: TextDirection.ltr,
-          )..layout();
 
-          textPainter.paint(
-            canvas,
-            Offset(x - textPainter.width / 2, chartArea.bottom + 5),
-          );
+          final label = series[0].dataPoints[i].label;
+          if (label != null) {
+            final textSpan = TextSpan(
+              text: label,
+              style: style.labelStyle ?? TextStyle(color: style.gridColor, fontSize: 10),
+            );
+            final textPainter = TextPainter(
+              text: textSpan,
+              textDirection: TextDirection.ltr,
+            )..layout();
+
+            textPainter.paint(
+              canvas,
+              Offset(x - textPainter.width / 2, chartArea.bottom + 5),
+            );
+          }
         }
       }
     }
@@ -345,10 +347,8 @@ class AreaChartPainter extends CustomPainter {
         i,
         seriesData.dataPoints.length,
       ); // X position
-      final normalizedValue = (seriesData.dataPoints[i].value - minValue) /
-          valueRange; // Normalize Y value
-      final y =
-          chartArea.bottom - (normalizedValue * chartArea.height); // Y position
+      final normalizedValue = (seriesData.dataPoints[i].value - minValue) / valueRange; // Normalize Y value
+      final y = chartArea.bottom - (normalizedValue * chartArea.height); // Y position
       return Offset(x, y); // Return the computed coordinate
     });
   }
@@ -371,6 +371,96 @@ class AreaChartPainter extends CustomPainter {
     return series.expand((s) => s.dataPoints).map((p) => p.value).reduce(min);
   }
 
+  /// Retrieves the value represented at the specified position within the chart.
+  /// The value is normalized based on the position of the pointer in the chart area.
+  double _getValueAtPosition(Offset position, Rect chartArea) {
+    final maxValue = _getMaxValue();
+    final minValue = _getMinValue();
+    final range = maxValue - minValue;
+    if (range == 0) return minValue;
+
+    // Map Y from top->bottom to max->min
+    final clampedY = position.dy.clamp(chartArea.top, chartArea.bottom);
+    final t = (clampedY - chartArea.top) / chartArea.height;
+    return maxValue - t * range;
+  }
+
+  /// Draws the crosshair lines and optional labels similar to Multi-Line chart.
+  void _drawCrosshair(Canvas canvas, Rect chartArea) {
+    if (tooltipPosition == null || style.crosshair == null) return;
+
+    final cfg = style.crosshair!;
+    final paint = Paint()
+      ..color = cfg.lineColor
+      ..strokeWidth = cfg.lineWidth;
+
+    // Vertical line
+    canvas.drawLine(
+      Offset(tooltipPosition!.dx, chartArea.top),
+      Offset(tooltipPosition!.dx, chartArea.bottom),
+      paint,
+    );
+
+    // Horizontal line
+    canvas.drawLine(
+      Offset(chartArea.left, tooltipPosition!.dy),
+      Offset(chartArea.right, tooltipPosition!.dy),
+      paint,
+    );
+
+    if (cfg.showLabel) {
+      _drawCrosshairLabels(canvas, chartArea);
+    }
+  }
+
+  /// Draws labels for crosshair (Y value and X label if available).
+  void _drawCrosshairLabels(Canvas canvas, Rect chartArea) {
+    if (tooltipPosition == null || style.crosshair == null) return;
+
+    final cfg = style.crosshair!;
+    final textStyle = cfg.labelStyle ?? TextStyle(color: cfg.lineColor, fontSize: 10);
+
+    // Y-axis value label
+    final yVal = _getValueAtPosition(tooltipPosition!, chartArea).toStringAsFixed(1);
+    final ySpan = TextSpan(text: yVal, style: textStyle);
+    final yPainter = TextPainter(text: ySpan, textDirection: TextDirection.ltr)..layout();
+
+    final yRect = Rect.fromLTWH(
+      chartArea.left - yPainter.width - 6,
+      (tooltipPosition!.dy - yPainter.height / 2).clamp(chartArea.top, chartArea.bottom - yPainter.height),
+      yPainter.width + 4,
+      yPainter.height + 2,
+    );
+
+    final bgPaint = Paint()
+      ..color = style.backgroundColor
+      ..style = PaintingStyle.fill;
+
+    canvas.drawRect(yRect, bgPaint);
+    yPainter.paint(canvas, Offset(yRect.left + 2, yRect.top + 1));
+
+    // X-axis label from nearest index (first series)
+    if (series.isNotEmpty && series.first.dataPoints.isNotEmpty) {
+      final count = series.first.dataPoints.length;
+      final t = ((tooltipPosition!.dx - chartArea.left) / chartArea.width).clamp(0.0, 1.0);
+      final idx = (t * (count - 1)).round();
+      final xLabel = series.first.dataPoints[idx].label ?? '${idx + 1}';
+
+      final xSpan = TextSpan(text: xLabel, style: textStyle);
+      final xPainter = TextPainter(text: xSpan, textDirection: TextDirection.ltr)..layout();
+
+      final xRect = Rect.fromLTWH(
+        (tooltipPosition!.dx - xPainter.width / 2).clamp(chartArea.left, chartArea.right - xPainter.width),
+        chartArea.bottom + 4,
+        xPainter.width + 4,
+        xPainter.height + 2,
+      );
+
+      canvas.drawRect(xRect, bgPaint);
+      xPainter.paint(canvas, Offset(xRect.left + 2, xRect.top + 1));
+    }
+  }
+
   @override
   bool shouldRepaint(AreaChartPainter oldDelegate) {
     // Determines if the painter needs to redraw the chart. Triggers repaint if:
@@ -378,9 +468,6 @@ class AreaChartPainter extends CustomPainter {
     // - The data series change
     // - The chart style is updated
     // - The tooltip position changes
-    return oldDelegate.progress != progress ||
-        oldDelegate.series != series ||
-        oldDelegate.style != style ||
-        oldDelegate.tooltipPosition != tooltipPosition;
+    return oldDelegate.progress != progress || oldDelegate.series != series || oldDelegate.style != style || oldDelegate.tooltipPosition != tooltipPosition;
   }
 }
