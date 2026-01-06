@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
 
 /// Represents a single data point in the area chart.
 class AreaChartData {
@@ -8,31 +9,59 @@ class AreaChartData {
       label; // Optional label for the data point, shown on the X-axis.
   final TooltipConfig?
       tooltipConfig; // Configuration for the tooltip displayed on hover.
+  final KeyEventData? keyEvent; // Optional key event data for special markers
 
   /// Creates an instance of `AreaChartData`.
-  const AreaChartData({required this.value, this.label, this.tooltipConfig});
+  const AreaChartData({required this.value, this.label, this.tooltipConfig, this.keyEvent});
 }
 
 /// Configuration for tooltips displayed when hovering over chart points.
 class TooltipConfig {
   final String? text; // Custom text to display in the tooltip.
+  final String? htmlContent; // HTML string to render in tooltip (requires flutter_html package)
   final TextStyle textStyle; // Style for the tooltip text.
   final Color backgroundColor; // Background color of the tooltip.
   final double borderRadius; // Radius for the tooltip's rounded corners.
   final EdgeInsets padding; // Inner padding within the tooltip box.
   final double hoverRadius; // Radius for detecting hover events around a point.
   final bool enabled; // Whether tooltips are enabled for this chart.
+  final double? maxWidth; // Maximum width for the tooltip
+  final double? maxHeight; // Maximum height for the tooltip
+  final BoxDecoration? decoration; // Custom decoration for the tooltip
 
   /// Creates a `TooltipConfig` with customizable properties.
   const TooltipConfig({
     this.text,
+    this.htmlContent,
     this.textStyle = const TextStyle(color: Colors.black87, fontSize: 12),
     this.backgroundColor = Colors.white,
     this.borderRadius = 4.0,
     this.padding = const EdgeInsets.all(8.0),
     this.hoverRadius = 10.0,
     this.enabled = true,
+    this.maxWidth,
+    this.maxHeight,
+    this.decoration,
   });
+  
+  /// Creates a TooltipConfig with HTML content
+  /// Use the flutter_html package to render the HTML in the chart widget
+  const TooltipConfig.html({
+    required String htmlContent,
+    double? maxWidth,
+    double? maxHeight,
+    EdgeInsets padding = const EdgeInsets.all(8.0),
+    BoxDecoration? decoration,
+  }) : this(
+    htmlContent: htmlContent,
+    maxWidth: maxWidth,
+    maxHeight: maxHeight,
+    padding: padding,
+    decoration: decoration,
+  );
+  
+  /// Whether this tooltip has HTML content
+  bool get hasHtmlContent => htmlContent != null;
 }
 
 /// Represents a series of data points and their appearance in the area chart.
@@ -234,7 +263,10 @@ class AreaChartStyle {
   final String? title; // Chart title from Plotly layout
   final String? xAxisTitle; // X-axis title from Plotly layout
   final String? yAxisTitle; // Y-axis title from Plotly layout
-  final AreaCrosshairConfig? crosshair; // Optional crosshair configuration //adding code
+  final AreaCrosshairConfig? crosshair; // Optional crosshair configuration
+  final bool showKeyEventMarkers; // Whether to show key event markers
+  final KeyEventMarkerConfig? keyEventMarkerConfig; // Configuration for key event markers
+  final TooltipStyleConfig? tooltipStyle; // Configuration for tooltip appearance
 
   /// Creates an instance of `AreaChartStyle` with default or custom properties.
   const AreaChartStyle({
@@ -254,7 +286,10 @@ class AreaChartStyle {
     this.title,
     this.xAxisTitle,
     this.yAxisTitle,
-    this.crosshair,//adding code
+    this.crosshair,
+    this.showKeyEventMarkers = true,
+    this.keyEventMarkerConfig,
+    this.tooltipStyle,
   });
 
   /// Creates an `AreaChartStyle` from a Plotly layout object.
@@ -297,20 +332,91 @@ class AreaChartStyle {
   }
 }
 
+/// Configuration for tooltip appearance
+class TooltipStyleConfig {
+  final Color backgroundColor; // Background color of the tooltip
+  final double backgroundOpacity; // Opacity of the background (0.0 to 1.0)
+  final double borderRadius; // Border radius of the tooltip
+  final double borderWidth; // Width of the tooltip border
+  final Color borderColor; // Color of the tooltip border
+  final double defaultMaxWidth; // Default maximum width for tooltips
+  final double defaultMaxHeight; // Default maximum height for tooltips
+
+  const TooltipStyleConfig({
+    this.backgroundColor = Colors.white,
+    this.backgroundOpacity = 0.95,
+    this.borderRadius = 8.0,
+    this.borderWidth = 1.0,
+    this.borderColor = Colors.grey,
+    this.defaultMaxWidth = 250.0,
+    this.defaultMaxHeight = 200.0,
+  });
+}
+
 /// Configures the crosshair behavior for the area chart.
-class AreaCrosshairConfig {//adding code
+class AreaCrosshairConfig {
   final Color lineColor; // Color of the crosshair lines
   final double lineWidth; // Width of the crosshair lines
   final bool enabled; // Whether crosshair is enabled
   final bool showLabel; // Whether to show labels for crosshair
   final TextStyle? labelStyle; // Optional label style
 
-  const AreaCrosshairConfig({//adding code
+  const AreaCrosshairConfig({
     this.lineColor = Colors.grey,
     this.lineWidth = 1.0,
     this.enabled = false,
     this.showLabel = true,
     this.labelStyle,
+  });
+}
+
+/// Represents key event data for special markers on the chart
+/// HTML content is required - if empty/null, no tooltip will be displayed
+class KeyEventData {
+  final String? htmlContent; // HTML string for rich tooltip content (required for tooltip display)
+  final Color? markerColor; // Color of the event marker
+  final double? markerSize; // Optional custom size for this marker (overrides config default)
+  final double? tooltipMaxWidth; // Maximum width for the tooltip
+  final double? tooltipMaxHeight; // Maximum height for the tooltip
+  final double tooltipOpacity; // Opacity of the tooltip (0.0 to 1.0, default 1.0)
+
+  /// Creates a KeyEventData with HTML content for rich tooltips
+  /// Use the flutter_html package to render the HTML in the chart widget
+  /// If htmlContent is null or empty, no tooltip will be displayed
+  const KeyEventData({
+    required String htmlContent,
+    Color? markerColor,
+    double? markerSize,
+    double? tooltipMaxWidth,
+    double? tooltipMaxHeight,
+    double tooltipOpacity = 1.0,
+  }) : htmlContent = htmlContent,
+       markerColor = markerColor,
+       markerSize = markerSize,
+       tooltipMaxWidth = tooltipMaxWidth,
+       tooltipMaxHeight = tooltipMaxHeight,
+       tooltipOpacity = tooltipOpacity;
+  
+  /// Whether this event has HTML content
+  bool get hasHtmlContent => htmlContent != null && htmlContent!.isNotEmpty;
+}
+
+/// Configuration for key event markers
+class KeyEventMarkerConfig {
+  final double size; // Size of the marker
+  final Color defaultColor; // Default color for markers
+  final double elevation; // Elevation/shadow of the marker
+  final double verticalOffset; // Offset above the line
+  final Duration tooltipShowDelay; // Delay before showing tooltip on hover
+  final double minHoverRadius; // Minimum hover radius for tooltip detection (ensures visibility even on small canvases)
+
+  const KeyEventMarkerConfig({
+    this.size = 10.0,
+    this.defaultColor = Colors.orange,
+    this.elevation = 4.0,
+    this.verticalOffset = 18.0,
+    this.tooltipShowDelay = const Duration(milliseconds: 300),
+    this.minHoverRadius = 15.0,
   });
 }
 

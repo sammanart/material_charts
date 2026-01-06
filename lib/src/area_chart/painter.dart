@@ -53,6 +53,15 @@ class AreaChartPainter extends CustomPainter {
     if (style.crosshair?.enabled == true && tooltipPosition != null) { //adding code
       _drawCrosshair(canvas, chartArea);//adding code
     }//adding code
+
+    // Draw key event markers if enabled
+    if (style.showKeyEventMarkers) {
+      for (int i = 0; i < series.length; i++) {
+        final seriesData = series[i];
+        final color = seriesData.color ?? style.colors[i % style.colors.length];
+        _drawKeyEventMarkers(canvas, chartArea, seriesData, color);
+      }
+    }
   }
 
   /// Draws the filled area below the line of the chart.
@@ -204,13 +213,16 @@ class AreaChartPainter extends CustomPainter {
     Rect chartArea,
     TooltipConfig config,
   ) {
-    final text = config.text ?? '$seriesName: ${dataPoint.value.toStringAsFixed(1)}'; // Generate tooltip text.
+    // If custom content is provided, we can't render it directly on canvas
+    // The widget layer will need to handle this
+    // For now, we'll draw the text-based tooltip
+    final text = config.text ?? '$seriesName: ${dataPoint.value.toStringAsFixed(1)}';
     final textSpan = TextSpan(text: text, style: config.textStyle);
 
     final textPainter = TextPainter(
       text: textSpan,
       textDirection: TextDirection.ltr,
-    )..layout();
+    )..layout(maxWidth: config.maxWidth ?? double.infinity);
 
     // Calculate tooltip dimensions and position.
     final tooltipWidth = textPainter.width + config.padding.horizontal;
@@ -224,18 +236,26 @@ class AreaChartPainter extends CustomPainter {
       tooltipY = point.dy + 10;
     }
 
-    // Draw tooltip background.
-    final bgPaint = Paint()
-      ..color = config.backgroundColor
-      ..style = PaintingStyle.fill;
+    // Draw tooltip background using custom decoration or default
+    if (config.decoration != null) {
+      config.decoration!.createBoxPainter().paint(
+        canvas,
+        Offset(tooltipX, tooltipY),
+        ImageConfiguration(size: Size(tooltipWidth, tooltipHeight)),
+      );
+    } else {
+      final bgPaint = Paint()
+        ..color = config.backgroundColor
+        ..style = PaintingStyle.fill;
 
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(tooltipX, tooltipY, tooltipWidth, tooltipHeight),
-        Radius.circular(config.borderRadius),
-      ),
-      bgPaint,
-    );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(tooltipX, tooltipY, tooltipWidth, tooltipHeight),
+          Radius.circular(config.borderRadius),
+        ),
+        bgPaint,
+      );
+    }
 
     // Render the tooltip text.
     textPainter.paint(
@@ -460,6 +480,62 @@ class AreaChartPainter extends CustomPainter {
       canvas.drawRect(xRect, bgPaint);
       xPainter.paint(canvas, Offset(xRect.left + 2, xRect.top + 1));
     }
+  }
+
+  /// Draws key event markers above the line for data points that have key events
+  void _drawKeyEventMarkers(
+    Canvas canvas,
+    Rect chartArea,
+    AreaChartSeries seriesData,
+    Color seriesColor,
+  ) {
+    final points = _getSeriesPoints(chartArea, seriesData);
+    final progressPoints = (points.length * progress).floor();
+    final config = style.keyEventMarkerConfig ?? const KeyEventMarkerConfig();
+
+    for (int i = 0; i < progressPoints; i++) {
+      final dataPoint = seriesData.dataPoints[i];
+      if (dataPoint.keyEvent == null) continue;
+
+      final keyEvent = dataPoint.keyEvent!;
+      final markerColor = keyEvent.markerColor ?? config.defaultColor;
+      final markerSize = keyEvent.markerSize ?? config.size; // Use custom size if provided
+      
+      // Calculate marker position (above the line point)
+      final markerOffset = Offset(
+        points[i].dx,
+        points[i].dy - config.verticalOffset,
+      );
+
+      // Draw the main marker circle
+      final markerPaint = Paint()
+        ..color = markerColor
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(markerOffset, markerSize / 2, markerPaint);
+
+      // Check if we should show tooltip for this key event
+      if (tooltipPosition != null) {
+        final distance = (markerOffset - tooltipPosition!).distance;
+        // Use marker size as hover radius (cursor must be on the circle)
+        final hoverRadius = markerSize / 2;
+        if (distance <= hoverRadius) {
+          _drawKeyEventTooltip(canvas, markerOffset, keyEvent, chartArea);
+        }
+      }
+    }
+  }
+
+  /// Draws a rich tooltip for key events
+  /// HTML tooltips are rendered by the widget overlay, not here
+  void _drawKeyEventTooltip(
+    Canvas canvas,
+    Offset markerPosition,
+    KeyEventData keyEvent,
+    Rect chartArea,
+  ) {
+    // All tooltips are now HTML-based and rendered by the widget overlay
+    // If no HTML content is provided, nothing is displayed
+    return;
   }
 
   @override

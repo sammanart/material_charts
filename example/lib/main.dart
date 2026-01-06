@@ -200,9 +200,90 @@ class AreaChartExample extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = [
       const AreaChartData(value: 10, label: 'Q1'),
-      const AreaChartData(value: 20, label: 'Q2'),
-      const AreaChartData(value: 15, label: 'Q3'),
-      const AreaChartData(value: 35, label: 'Q4'),
+      AreaChartData(
+        value: 20,
+        label: 'Q2',
+        keyEvent: KeyEventData(
+          htmlContent: '''
+            <div style="font-family: Arial, sans-serif; padding: 4px;">
+              <h3 style="margin: 0 0 8px 0; color: #4CAF50; font-size: 14px;">Analyst Rating</h3>
+              <div style="font-size: 12px;">
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Date</span>
+                  <span style="margin-left: 40px; color: #333;">Oct 28, 2025</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Analyst</span>
+                  <span style="margin-left: 40px; color: #333;">UBS</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Rating Action</span>
+                  <span style="margin-left: 40px; color: #333;">Maintains</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Rating</span>
+                  <span style="margin-left: 40px; color: #333;">Neutral</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Price Action</span>
+                  <span style="margin-left: 40px; color: #333;">Raises</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Price Target</span>
+                  <span style="margin-left: 40px; color: #333;">87 → 100</span>
+                </div>
+              </div>
+            </div>
+          ''',
+          markerColor: Colors.green,
+          tooltipMaxWidth: 220,
+          tooltipOpacity: 0.6,
+        ),
+      ),
+      const AreaChartData(value: 15, label: 'Q2'),
+      AreaChartData(
+        value: 35,
+        label: 'Q4',
+        // Example of HTML content for rich tooltip
+        keyEvent: KeyEventData(
+          htmlContent: '''
+            <div style="font-family: Arial, sans-serif; padding: 4px;">
+              <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 20px; margin-right: 8px;">�</span>
+              <h3 style="margin: 0 0 8px 0; color: #FF6600; font-size: 14px;">Analyst Rating</h3>
+              <div style="font-size: 12px;">
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Date</span>
+                  <span style="margin-left: 40px; color: #333;">Oct 28, 2025</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Analyst</span>
+                  <span style="margin-left: 40px; color: #333;">UBS</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Rating Action</span>
+                  <span style="margin-left: 40px; color: #333;">Maintains</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Rating</span>
+                  <span style="margin-left: 40px; color: #333;">Neutral</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Price Action</span>
+                  <span style="margin-left: 40px; color: #333;">Raises</span>
+                </div>
+                <div style="margin-bottom: 4px;">
+                  <span style="color: #666;">Price Target</span>
+                  <span style="margin-left: 40px; color: #333;">87 → 100</span>
+                </div>
+              </div>
+            </div>
+          ''',
+          markerColor: Colors.orange,
+          tooltipMaxWidth: 220,
+          tooltipOpacity: 0.6,
+        ),
+      ),
     ];
 
     final series = [
@@ -217,14 +298,31 @@ class AreaChartExample extends StatelessWidget {
     return Column(
       children: [
         const Text(
-          'Quarterly Revenue Trend',
+          'Quarterly Revenue Trend with Key Events',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 20),
         MaterialAreaChart(
+          style: AreaChartStyle(
+            crosshair: AreaCrosshairConfig(enabled: true),
+            showKeyEventMarkers: true,
+            tooltipStyle: TooltipStyleConfig(
+              backgroundColor: Colors.white,
+              backgroundOpacity: 0.95,
+              borderRadius: 12.0,
+              borderWidth: 0.0,
+              defaultMaxWidth: 280.0,
+              defaultMaxHeight: 250.0,
+            ),
+          ),
           series: series,
           width: 350,
           height: 250,
+        ),
+        const SizedBox(height: 10),
+        const Text(
+          'Hover over markers to see key events with custom tooltip styling',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
         ),
       ],
     );

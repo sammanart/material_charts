@@ -1,5 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_html/flutter_html.dart';
+
 import 'models.dart';
 import 'painter.dart';
 
@@ -171,6 +173,8 @@ class _MaterialAreaChartState extends State<MaterialAreaChart>
       _controller; // Animation controller for managing the animation
   late Animation<double> _animation; // Animation for the progress of the chart
   Offset? _tooltipPosition; // Position of the tooltip when hovering over points
+  KeyEventData? _activeHtmlTooltip; // The currently active HTML tooltip
+  Offset? _activeTooltipPosition; // Position of the active HTML tooltip
 
   @override
   void initState() {
@@ -224,42 +228,49 @@ class _MaterialAreaChartState extends State<MaterialAreaChart>
             ),
           ),
 
-        // Main chart area
-        MouseRegion(
-          // Detect mouse hover events
-          onHover: widget.interactive
-              ? _handleHover
-              : null, // Handle hover if interactive
-          onExit: widget.interactive
-              ? (_) => setState(
-                    () => _tooltipPosition = null,
-                  ) // Clear tooltip position on exit
-              : null,
-          child: Container(
-            width: widget.width, // Set the width of the container
-            height: widget.height, // Set the height of the container
-            color: widget.style
-                .backgroundColor, // Set the background color from the style
-            child: AnimatedBuilder(
-              // Rebuild the widget when the animation changes
-              animation: _animation,
-              builder: (context, _) {
-                return CustomPaint(
-                  size: Size(
-                    widget.width,
-                    widget.height,
-                  ), // Set the size for the custom painter
-                  painter: AreaChartPainter(
-                    series:
-                        widget.series, // Pass the series data to the painter
-                    progress:
-                        _animation.value, // Pass the current animation progress
-                    style: widget.style, // Pass the style configuration
-                    tooltipPosition:
-                        _tooltipPosition, // Pass the tooltip position
+        // Main chart area with HTML tooltip overlay
+        SizedBox(
+          width: widget.width,
+          height: widget.height,
+          child: MouseRegion(
+            onHover: widget.interactive ? _handleHover : null,
+            onExit: widget.interactive
+                ? (_) => setState(() {
+                      _tooltipPosition = null;
+                      _activeHtmlTooltip = null;
+                      _activeTooltipPosition = null;
+                    })
+                : null,
+            child: Stack(
+              children: [
+                // Chart canvas
+                Container(
+                  width: widget.width,
+                  height: widget.height,
+                  color: widget.style.backgroundColor,
+                  child: AnimatedBuilder(
+                    animation: _animation,
+                    builder: (context, _) {
+                      // Update active HTML tooltip based on hover
+                      _updateActiveTooltip();
+                      
+                      return CustomPaint(
+                        size: Size(widget.width, widget.height),
+                        painter: AreaChartPainter(
+                          series: widget.series,
+                          progress: _animation.value,
+                          style: widget.style,
+                          tooltipPosition: _tooltipPosition,
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
+                ),
+                
+                // HTML tooltip overlay
+                if (_activeHtmlTooltip != null && _activeTooltipPosition != null)
+                  _buildHtmlTooltip(),
+              ],
             ),
           ),
         ),
@@ -307,5 +318,143 @@ class _MaterialAreaChartState extends State<MaterialAreaChart>
     setState(
       () => _tooltipPosition = event.localPosition,
     ); // Update tooltip position based on mouse location
+  }
+  
+  /// Updates the active HTML tooltip based on hover position
+  void _updateActiveTooltip() {
+    if (_tooltipPosition == null || !widget.style.showKeyEventMarkers) {
+      _activeHtmlTooltip = null;
+      _activeTooltipPosition = null;
+      return;
+    }
+    
+    final config = widget.style.keyEventMarkerConfig ?? const KeyEventMarkerConfig();
+    
+    // Check all series for key events
+    for (final seriesData in widget.series) {
+      final points = _getSeriesPoints(seriesData);
+      
+      for (int i = 0; i < seriesData.dataPoints.length; i++) {
+        final dataPoint = seriesData.dataPoints[i];
+        if (dataPoint.keyEvent == null || !dataPoint.keyEvent!.hasHtmlContent) continue;
+        
+        if (i >= points.length) continue;
+        
+        final markerSize = dataPoint.keyEvent!.markerSize ?? config.size;
+        final calculatedRadius = markerSize / 2;
+        final hoverRadius = calculatedRadius > config.minHoverRadius ? calculatedRadius : config.minHoverRadius;
+        
+        final markerOffset = Offset(
+          points[i].dx,
+          points[i].dy - config.verticalOffset,
+        );
+        
+        final distance = (markerOffset - _tooltipPosition!).distance;
+        if (distance <= hoverRadius) {
+          _activeHtmlTooltip = dataPoint.keyEvent;
+          _activeTooltipPosition = markerOffset;
+          return;
+        }
+      }
+    }
+    
+    _activeHtmlTooltip = null;
+    _activeTooltipPosition = null;
+  }
+  
+  /// Builds the HTML tooltip widget overlay
+  Widget _buildHtmlTooltip() {
+    if (_activeHtmlTooltip == null || _activeTooltipPosition == null) {
+      return const SizedBox.shrink();
+    }
+    
+    final padding = widget.style.padding;
+    final opacity = _activeHtmlTooltip!.tooltipOpacity.clamp(0.0, 1.0);
+    
+    // Get tooltip style configuration or use defaults
+    final tooltipStyle = widget.style.tooltipStyle ?? const TooltipStyleConfig();
+    
+    // Use tooltip-specific dimensions if provided, otherwise use style defaults
+    final maxWidth = _activeHtmlTooltip!.tooltipMaxWidth ?? tooltipStyle.defaultMaxWidth;
+    final maxHeight = _activeHtmlTooltip!.tooltipMaxHeight ?? tooltipStyle.defaultMaxHeight;
+    
+    // Calculate position (above the marker)
+    double left = _activeTooltipPosition!.dx - maxWidth / 2;
+    double top = _activeTooltipPosition!.dy - 120; // Approximate tooltip height offset
+    
+    // Adjust if going outside bounds
+    left = left.clamp(padding.left, widget.width - maxWidth - padding.right);
+    if (top < padding.top) {
+      top = _activeTooltipPosition!.dy + 15; // Show below if not enough space above
+    }
+    
+    return Positioned(
+      left: left,
+      top: top,
+      child: Material(
+        elevation: 0,
+        borderRadius: BorderRadius.circular(tooltipStyle.borderRadius),
+        color: Colors.transparent,
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: maxWidth,
+            maxHeight: maxHeight,
+          ),
+          decoration: BoxDecoration(
+            color: tooltipStyle.backgroundColor.withValues(
+              alpha: opacity * tooltipStyle.backgroundOpacity,
+            ),
+            borderRadius: BorderRadius.circular(tooltipStyle.borderRadius),
+            border: tooltipStyle.borderWidth > 0
+                ? Border.all(
+                    color: tooltipStyle.borderColor,
+                    width: tooltipStyle.borderWidth,
+                  )
+                : null,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(8),
+            child: Html(
+              data: _activeHtmlTooltip!.htmlContent,
+              style: {
+                "*": Style(
+                  margin: Margins.zero,
+                  padding: HtmlPaddings.zero,
+                  backgroundColor: Colors.transparent,
+                ),
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  
+  /// Helper method to get series points (same logic as painter)
+  List<Offset> _getSeriesPoints(AreaChartSeries seriesData) {
+    if (seriesData.dataPoints.isEmpty) return [];
+    
+    final chartArea = Rect.fromLTWH(
+      widget.style.padding.left,
+      widget.style.padding.top,
+      widget.width - widget.style.padding.horizontal,
+      widget.height - widget.style.padding.vertical,
+    );
+    
+    final allValues = widget.series
+        .expand((s) => s.dataPoints)
+        .map((p) => p.value);
+    final maxValue = allValues.reduce((a, b) => a > b ? a : b);
+    final minValue = widget.style.forceYAxisFromZero 
+        ? 0.0 
+        : allValues.reduce((a, b) => a < b ? a : b);
+    final valueRange = maxValue - minValue;
+    
+    return List.generate(seriesData.dataPoints.length, (i) {
+      final x = chartArea.left + (chartArea.width / (seriesData.dataPoints.length - 1)) * i;
+      final normalizedValue = (seriesData.dataPoints[i].value - minValue) / valueRange;
+      final y = chartArea.bottom - (normalizedValue * chartArea.height);
+      return Offset(x, y);
+    });
   }
 }
