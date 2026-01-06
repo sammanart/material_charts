@@ -23,7 +23,7 @@ class MaterialAreaChart extends StatefulWidget {
     this.style = const AreaChartStyle(), // Default style if none provided
     this.onAnimationComplete, // Optional callback for animation completion
     this.interactive = true, // Default to interactive
-  });
+  }); 
 
   /// Creates a MaterialAreaChart from Plotly JSON string.
   ///

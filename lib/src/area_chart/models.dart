@@ -386,7 +386,7 @@ class KeyEventData {
   const KeyEventData({
     required String htmlContent,
     Color? markerColor,
-    double? markerSize,
+    double? markerSize, 
     double? tooltipMaxWidth,
     double? tooltipMaxHeight,
     double tooltipOpacity = 1.0,

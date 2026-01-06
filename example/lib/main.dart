@@ -314,7 +314,7 @@ class AreaChartExample extends StatelessWidget {
               defaultMaxWidth: 280.0,
               defaultMaxHeight: 250.0,
             ),
-          ),
+          ), 
           series: series,
           width: 350,
           height: 250,

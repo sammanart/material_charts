@@ -536,7 +536,7 @@ class AreaChartPainter extends CustomPainter {
     // All tooltips are now HTML-based and rendered by the widget overlay
     // If no HTML content is provided, nothing is displayed
     return;
-  }
+  } 
 
   @override
   bool shouldRepaint(AreaChartPainter oldDelegate) {
