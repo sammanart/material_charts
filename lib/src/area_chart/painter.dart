@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+
 import 'models.dart';
 
 /// Custom painter for rendering an area chart.
@@ -426,7 +427,7 @@ class AreaChartPainter extends CustomPainter {
     final yPainter = TextPainter(text: ySpan, textDirection: TextDirection.ltr)..layout();
 
     final yRect = Rect.fromLTWH(
-      chartArea.left - yPainter.width - 6,
+      chartArea.right + 23,
       (tooltipPosition!.dy - yPainter.height / 2).clamp(chartArea.top, chartArea.bottom - yPainter.height),
       yPainter.width + 4,
       yPainter.height + 2,
