@@ -35,10 +35,11 @@ class AreaChartPainter extends CustomPainter {
       final seriesData = series[i];
       // Get the colors for the series (fallback to default style colors if not defined).
       final color = seriesData.color ?? style.colors[i % style.colors.length];
-      final gradientColor = color.withValues(alpha: 0.0); //adding code, making it more transparent
+      final topFill = color.withValues(alpha: style.areaFillOpacityTop.clamp(0.0, 1.0));
+      final bottomFill = color.withValues(alpha: style.areaFillOpacityBottom.clamp(0.0, 1.0));
 
       // Draw the area below the line for the series.
-      _drawArea(canvas, chartArea, seriesData, color.withValues(alpha: 0.2), gradientColor); //adding code,making it start transparent
+      _drawArea(canvas, chartArea, seriesData, topFill, bottomFill);
 
       // Draw the line connecting the data points.
       _drawLine(canvas, chartArea, seriesData, color);
@@ -53,6 +54,11 @@ class AreaChartPainter extends CustomPainter {
     if (style.crosshair?.enabled == true && tooltipPosition != null) { //adding code
       _drawCrosshair(canvas, chartArea);//adding code
     }//adding code
+
+    // Draw baseline if enabled
+    if (style.baseline?.show == true) {
+      _drawBaseline(canvas, chartArea);
+    }
 
     // Draw key event markers if enabled
     if (style.showKeyEventMarkers) {
@@ -307,7 +313,8 @@ class AreaChartPainter extends CustomPainter {
 
     // Vertical grid lines and labels.
     if (series.isNotEmpty && series[0].dataPoints.isNotEmpty) {
-      final pointCount = series[0].dataPoints.length;
+      final slots = style.xSpanSlots ?? series[0].dataPoints.length;
+      final pointCount = min(series[0].dataPoints.length, slots);
       for (int i = 0; i < pointCount; i++) {
         if (series[0].dataPoints.elementAt(i).label != null && series[0].dataPoints.elementAt(i).label != "") {
           //adding code, this condition allows a vertical line to be drawn ONLY if the data point has a label or an empty string.
@@ -362,7 +369,11 @@ class AreaChartPainter extends CustomPainter {
 
     // Generate a list of points representing the chart's data. Each point is calculated
     // by mapping the data value to the Y-coordinate within the chart area.
-    return List.generate(seriesData.dataPoints.length, (i) {
+    final slots = style.xSpanSlots ?? seriesData.dataPoints.length;
+    final count = seriesData.dataPoints.length < slots
+        ? seriesData.dataPoints.length
+        : slots;
+    return List.generate(count, (i) {
       final x = _getXCoordinate(
         chartArea,
         i,
@@ -377,19 +388,38 @@ class AreaChartPainter extends CustomPainter {
   double _getXCoordinate(Rect chartArea, int index, int totalPoints) {
     // Calculates the X-coordinate for a data point based on its index.
     // Distributes points evenly across the width of the chart area.
-    return chartArea.left + (chartArea.width / (totalPoints - 1)) * index;
+    final slots = style.xSpanSlots ?? totalPoints;
+    final denom = (slots - 1) <= 0 ? 1 : (slots - 1);
+
+    return chartArea.left + (chartArea.width / denom) * index;
   }
 
   double _getMaxValue() {
-    // Finds the maximum data point value across all series to scale the chart correctly.
-    return series.expand((s) => s.dataPoints).map((p) => p.value).reduce(max);
+    // Finds the maximum value across all series within the effective slot window.
+    final slots = style.xSpanSlots; 
+    final values = <double>[];
+    for (final s in series) {
+      final takeCount = slots == null ? s.dataPoints.length : min(s.dataPoints.length, slots);
+      if (takeCount > 0) {
+        values.addAll(s.dataPoints.take(takeCount).map((p) => p.value));
+      }
+    }
+    return values.reduce(max);
   }
 
   double _getMinValue() {
-    // Finds the minimum data point value across all series to scale the chart correctly.
+    // Finds the minimum value across all series within the effective slot window.
     // Forces the Y-axis to start from zero if specified in the style.
     if (style.forceYAxisFromZero) return 0;
-    return series.expand((s) => s.dataPoints).map((p) => p.value).reduce(min);
+    final slots = style.xSpanSlots; 
+    final values = <double>[];
+    for (final s in series) {
+      final takeCount = slots == null ? s.dataPoints.length : min(s.dataPoints.length, slots);
+      if (takeCount > 0) {
+        values.addAll(s.dataPoints.take(takeCount).map((p) => p.value));
+      }
+    }
+    return values.reduce(min);
   }
 
   /// Retrieves the value represented at the specified position within the chart.
@@ -454,7 +484,7 @@ class AreaChartPainter extends CustomPainter {
     );
 
     final bgPaint = Paint()
-      ..color = style.backgroundColor
+      ..color = cfg.labelBackgroundColor ?? style.backgroundColor
       ..style = PaintingStyle.fill;
 
     canvas.drawRect(yRect, bgPaint);
@@ -462,24 +492,76 @@ class AreaChartPainter extends CustomPainter {
 
     // X-axis label from nearest index (first series)
     if (series.isNotEmpty && series.first.dataPoints.isNotEmpty) {
-      final count = series.first.dataPoints.length;
+      final rawCount = series.first.dataPoints.length;
+      final slots = style.xSpanSlots ?? rawCount;
+      final count = min(rawCount, slots);
+      final denom = (slots - 1) <= 0 ? 1 : (slots - 1);
+
       final t = ((tooltipPosition!.dx - chartArea.left) / chartArea.width).clamp(0.0, 1.0);
-      final idx = (t * (count - 1)).round();
-      final xLabel = series.first.dataPoints[idx].label ?? '${idx + 1}';
+      final slotIdx = (t * denom).round();
+      final idx = slotIdx.clamp(0, count - 1);
+      final label = series.first.dataPoints[idx].label;
+      // Only display X-axis crosshair label when it's non-null and non-empty
+      if (label != null && label.trim().isNotEmpty) {
+        final xSpan = TextSpan(text: label, style: textStyle);
+        final xPainter = TextPainter(text: xSpan, textDirection: TextDirection.ltr)..layout();
 
-      final xSpan = TextSpan(text: xLabel, style: textStyle);
-      final xPainter = TextPainter(text: xSpan, textDirection: TextDirection.ltr)..layout();
+        final xRect = Rect.fromLTWH(
+          (tooltipPosition!.dx - xPainter.width / 2).clamp(chartArea.left, chartArea.right - xPainter.width),
+          chartArea.bottom + 4,
+          xPainter.width + 4,
+          xPainter.height + 2,
+        );
 
-      final xRect = Rect.fromLTWH(
-        (tooltipPosition!.dx - xPainter.width / 2).clamp(chartArea.left, chartArea.right - xPainter.width),
-        chartArea.bottom + 4,
-        xPainter.width + 4,
-        xPainter.height + 2,
-      );
-
-      canvas.drawRect(xRect, bgPaint);
-      xPainter.paint(canvas, Offset(xRect.left + 2, xRect.top + 1));
+        canvas.drawRect(xRect, bgPaint);
+        xPainter.paint(canvas, Offset(xRect.left + 2, xRect.top + 1));
+      }
     }
+  }
+
+  /// Draws a dotted horizontal baseline at the height of the first data point value
+  void _drawBaseline(Canvas canvas, Rect chartArea) {
+    if (series.isEmpty || series.first.dataPoints.isEmpty) return;
+    
+    final config = style.baseline!;
+    final firstValue = series.first.dataPoints.first.value;
+    final seriesColor = series.first.color ?? style.colors.first;
+    final baselineColor = config.color ?? seriesColor;
+    
+    // Calculate Y position for the first value
+    final maxValue = _getMaxValue();
+    final minValue = _getMinValue();
+    final valueRange = maxValue - minValue;
+    
+    if (valueRange == 0) return;
+    
+    final normalizedValue = (firstValue - minValue) / valueRange;
+    final y = chartArea.bottom - (normalizedValue * chartArea.height);
+    
+    // Create paint for the dotted line
+    final paint = Paint()
+      ..color = baselineColor
+      ..strokeWidth = config.strokeWidth
+      ..style = PaintingStyle.stroke;
+    
+    // Draw dotted line across the chart
+    final path = Path();
+    double startX = chartArea.left;
+    final endX = chartArea.right;
+    
+    // Create dashed pattern
+    final dashWidth = config.dashPattern[0];
+    final dashSpace = config.dashPattern.length > 1 ? config.dashPattern[1] : dashWidth;
+    
+    while (startX < endX) {
+      path.moveTo(startX, y);
+      startX += dashWidth;
+      if (startX > endX) startX = endX;
+      path.lineTo(startX, y);
+      startX += dashSpace;
+    }
+    
+    canvas.drawPath(path, paint);
   }
 
   /// Draws key event markers above the line for data points that have key events
@@ -500,11 +582,12 @@ class AreaChartPainter extends CustomPainter {
       final keyEvent = dataPoint.keyEvent!;
       final markerColor = keyEvent.markerColor ?? config.defaultColor;
       final markerSize = keyEvent.markerSize ?? config.size; // Use custom size if provided
+      final verticalOffset = keyEvent.verticalOffset ?? config.verticalOffset; // Use custom offset if provided
       
       // Calculate marker position (above the line point)
       final markerOffset = Offset(
         points[i].dx,
-        points[i].dy - config.verticalOffset,
+        points[i].dy - verticalOffset,
       );
 
       // Draw the main marker circle

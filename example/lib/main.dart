@@ -201,8 +201,7 @@ class AreaChartExample extends StatelessWidget {
     final data = [
       const AreaChartData(value: 10, label: 'Q1'),
       AreaChartData(
-        value: 20,
-        label: 'Q2',
+        value: 20,label: "Q2",
         keyEvent: KeyEventData(
           htmlContent: '''
             <div style="font-family: Arial, sans-serif; padding: 4px;">
@@ -240,16 +239,14 @@ class AreaChartExample extends StatelessWidget {
           tooltipOpacity: 0.6,
         ),
       ),
-      const AreaChartData(value: 15, label: 'Q2'),
+      const AreaChartData(value: 15, label: 'Q3'),
       AreaChartData(
         value: 35,
         label: 'Q4',
-        // Example of HTML content for rich tooltip
         keyEvent: KeyEventData(
           htmlContent: '''
             <div style="font-family: Arial, sans-serif; padding: 4px;">
               <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                <span style="font-size: 20px; margin-right: 8px;">�</span>
               <h3 style="margin: 0 0 8px 0; color: #FF6600; font-size: 14px;">Analyst Rating</h3>
               <div style="font-size: 12px;">
                 <div style="margin-bottom: 4px;">
@@ -291,7 +288,7 @@ class AreaChartExample extends StatelessWidget {
         name: 'Revenue',
         dataPoints: data,
         color: Colors.blue,
-        gradientColor: Colors.blue.withValues(alpha: 0.3),
+        gradientColor: Colors.blue.withValues(alpha: 0),
       ),
     ];
 
@@ -304,7 +301,16 @@ class AreaChartExample extends StatelessWidget {
         const SizedBox(height: 20),
         MaterialAreaChart(
           style: AreaChartStyle(
-            crosshair: AreaCrosshairConfig(enabled: true),
+            keyEventMarkerConfig: KeyEventMarkerConfig(
+              verticalOffset: 18,
+            ),
+            crosshair: AreaCrosshairConfig(
+                enabled: true,
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  backgroundColor: Colors.grey,
+                  color: Colors.white,
+                )),
             showKeyEventMarkers: true,
             tooltipStyle: TooltipStyleConfig(
               backgroundColor: Colors.white,
@@ -314,7 +320,14 @@ class AreaChartExample extends StatelessWidget {
               defaultMaxWidth: 280.0,
               defaultMaxHeight: 250.0,
             ),
-          ), 
+            baseline: BaselineConfig(
+              show: true,
+              //color: Colors.grey.shade400, // The baseline's default color is the same as the chart's line's color.
+              strokeWidth: 2.0,
+              dashPattern: [5.0, 3.0],
+            ),
+            xSpanSlots: 12,
+          ),
           series: series,
           width: 350,
           height: 250,

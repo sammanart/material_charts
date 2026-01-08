@@ -258,6 +258,7 @@ class AreaChartStyle {
   final Duration animationDuration; // Duration for chart animations.
   final Curve animationCurve; // Animation curve for transitions.
   final EdgeInsets padding; // Padding around the chart.
+  final int? xSpanSlots; // Total slots across X axis (e.g., 24 for 24 hours); spreads points across this span
   final int horizontalGridLines; // Number of horizontal grid lines.
   final bool forceYAxisFromZero; // Force Y-axis to start from zero.
   final String? title; // Chart title from Plotly layout
@@ -267,6 +268,11 @@ class AreaChartStyle {
   final bool showKeyEventMarkers; // Whether to show key event markers
   final KeyEventMarkerConfig? keyEventMarkerConfig; // Configuration for key event markers
   final TooltipStyleConfig? tooltipStyle; // Configuration for tooltip appearance
+  final BaselineConfig? baseline; // Configuration for the baseline reference line
+  // Opacity for the area fill gradient under the line
+  // 'areaFillOpacityTop' applies near the line, 'areaFillOpacityBottom' at the bottom
+  final double areaFillOpacityTop;
+  final double areaFillOpacityBottom;
 
   /// Creates an instance of `AreaChartStyle` with default or custom properties.
   const AreaChartStyle({
@@ -281,6 +287,7 @@ class AreaChartStyle {
     this.animationDuration = const Duration(milliseconds: 1500),
     this.animationCurve = Curves.easeInOut,
     this.padding = const EdgeInsets.all(24),
+    this.xSpanSlots,
     this.horizontalGridLines = 5,
     this.forceYAxisFromZero = true,
     this.title,
@@ -290,6 +297,9 @@ class AreaChartStyle {
     this.showKeyEventMarkers = true,
     this.keyEventMarkerConfig,
     this.tooltipStyle,
+    this.baseline,
+    this.areaFillOpacityTop = 0.2,
+    this.areaFillOpacityBottom = 0.0,
   });
 
   /// Creates an `AreaChartStyle` from a Plotly layout object.
@@ -360,6 +370,7 @@ class AreaCrosshairConfig {
   final bool enabled; // Whether crosshair is enabled
   final bool showLabel; // Whether to show labels for crosshair
   final TextStyle? labelStyle; // Optional label style
+  final Color? labelBackgroundColor; // Background color for crosshair labels
 
   const AreaCrosshairConfig({
     this.lineColor = Colors.grey,
@@ -367,6 +378,7 @@ class AreaCrosshairConfig {
     this.enabled = false,
     this.showLabel = true,
     this.labelStyle,
+    this.labelBackgroundColor,
   });
 }
 
@@ -376,6 +388,7 @@ class KeyEventData {
   final String? htmlContent; // HTML string for rich tooltip content (required for tooltip display)
   final Color? markerColor; // Color of the event marker
   final double? markerSize; // Optional custom size for this marker (overrides config default)
+  final double? verticalOffset; // Optional custom vertical offset for this marker (overrides config default)
   final double? tooltipMaxWidth; // Maximum width for the tooltip
   final double? tooltipMaxHeight; // Maximum height for the tooltip
   final double tooltipOpacity; // Opacity of the tooltip (0.0 to 1.0, default 1.0)
@@ -386,13 +399,15 @@ class KeyEventData {
   const KeyEventData({
     required String htmlContent,
     Color? markerColor,
-    double? markerSize, 
+    double? markerSize,
+    double? verticalOffset,
     double? tooltipMaxWidth,
     double? tooltipMaxHeight,
     double tooltipOpacity = 1.0,
   }) : htmlContent = htmlContent,
        markerColor = markerColor,
        markerSize = markerSize,
+       verticalOffset = verticalOffset,
        tooltipMaxWidth = tooltipMaxWidth,
        tooltipMaxHeight = tooltipMaxHeight,
        tooltipOpacity = tooltipOpacity;
@@ -405,18 +420,30 @@ class KeyEventData {
 class KeyEventMarkerConfig {
   final double size; // Size of the marker
   final Color defaultColor; // Default color for markers
-  final double elevation; // Elevation/shadow of the marker
   final double verticalOffset; // Offset above the line
-  final Duration tooltipShowDelay; // Delay before showing tooltip on hover
   final double minHoverRadius; // Minimum hover radius for tooltip detection (ensures visibility even on small canvases)
 
   const KeyEventMarkerConfig({
     this.size = 10.0,
     this.defaultColor = Colors.orange,
-    this.elevation = 4.0,
     this.verticalOffset = 18.0,
-    this.tooltipShowDelay = const Duration(milliseconds: 300),
     this.minHoverRadius = 15.0,
+  });
+}
+
+/// Configuration for the baseline reference line
+/// Shows a horizontal dotted line at the height of the first data point
+class BaselineConfig {
+  final bool show; // Whether to show the baseline
+  final Color? color; // Color of the baseline (defaults to series color if null)
+  final double strokeWidth; // Width of the baseline stroke
+  final List<double> dashPattern; // Dash pattern for the line [dash, gap]
+
+  const BaselineConfig({
+    this.show = false,
+    this.color,
+    this.strokeWidth = 1.5,
+    this.dashPattern = const [5.0, 5.0],
   });
 }
 

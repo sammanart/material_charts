@@ -441,17 +441,24 @@ class _MaterialAreaChartState extends State<MaterialAreaChart>
       widget.height - widget.style.padding.vertical,
     );
     
-    final allValues = widget.series
-        .expand((s) => s.dataPoints)
-        .map((p) => p.value);
+    final slots = widget.style.xSpanSlots;
+    final allValues = widget.series.expand((s) {
+      final takeCount = slots == null ? s.dataPoints.length : (s.dataPoints.length < slots ? s.dataPoints.length : slots);
+      return s.dataPoints.take(takeCount).map((p) => p.value);
+    });
     final maxValue = allValues.reduce((a, b) => a > b ? a : b);
     final minValue = widget.style.forceYAxisFromZero 
         ? 0.0 
         : allValues.reduce((a, b) => a < b ? a : b);
     final valueRange = maxValue - minValue;
     
-    return List.generate(seriesData.dataPoints.length, (i) {
-      final x = chartArea.left + (chartArea.width / (seriesData.dataPoints.length - 1)) * i;
+    final count = slots == null
+        ? seriesData.dataPoints.length
+        : (seriesData.dataPoints.length < slots ? seriesData.dataPoints.length : slots);
+    return List.generate(count, (i) {
+      final slots = widget.style.xSpanSlots ?? seriesData.dataPoints.length;
+      final denom = (slots - 1) <= 0 ? 1 : (slots - 1);
+      final x = chartArea.left + (chartArea.width / denom) * i;
       final normalizedValue = (seriesData.dataPoints[i].value - minValue) / valueRange;
       final y = chartArea.bottom - (normalizedValue * chartArea.height);
       return Offset(x, y);
