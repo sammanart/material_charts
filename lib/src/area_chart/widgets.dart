@@ -248,6 +248,7 @@ class _MaterialAreaChartState extends State<MaterialAreaChart> with SingleTicker
                         })
                     : null,
                 child: Stack(
+                  clipBehavior: Clip.none,
                   children: [
                     // Chart canvas
                     Container(
@@ -400,11 +401,12 @@ class _MaterialAreaChartState extends State<MaterialAreaChart> with SingleTicker
     return Positioned(
       left: left,
       top: top,
-      child: Material(
-        elevation: 0,
-        borderRadius: BorderRadius.circular(tooltipStyle.borderRadius),
-        color: Colors.transparent,
-        child: Container(
+      child: IgnorePointer(
+        child: Material(
+          elevation: 0,
+          borderRadius: BorderRadius.circular(tooltipStyle.borderRadius),
+          color: Colors.transparent,
+          child: Container(
           constraints: BoxConstraints(
             maxWidth: maxWidth,
             maxHeight: maxHeight,
@@ -434,6 +436,7 @@ class _MaterialAreaChartState extends State<MaterialAreaChart> with SingleTicker
               },
             ),
           ),
+        ),
         ),
       ),
     );
