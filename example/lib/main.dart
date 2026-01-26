@@ -36,6 +36,7 @@ class _ChartsDemoState extends State<ChartsDemo> {
     const BarChartExample(),
     const PieChartExample(),
     const AreaChartExample(),
+    const TreemapChartExample(),
     const MultiLineChartExample(),
     const StackedBarChartExample(),
     const HollowSemiCircleExample(),
@@ -48,6 +49,7 @@ class _ChartsDemoState extends State<ChartsDemo> {
     'Bar Chart',
     'Pie Chart',
     'Area Chart',
+    'Treemap Chart',
     'Multi-Line Chart',
     'Stacked Bar Chart',
     'Hollow Semi-Circle',
@@ -201,7 +203,8 @@ class AreaChartExample extends StatelessWidget {
     final data = [
       const AreaChartData(value: 10, label: 'Q1'),
       AreaChartData(
-        value: 20,label: "Q2",
+        value: 20,
+        label: "Q2",
         keyEvent: KeyEventData(
           htmlContent: '''
             <div style="font-family: Arial, sans-serif; padding: 4px;">
@@ -336,6 +339,68 @@ class AreaChartExample extends StatelessWidget {
         const Text(
           'Hover over markers to see key events with custom tooltip styling',
           style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      ],
+    );
+  }
+}
+
+// Treemap chart example
+
+class TreemapChartExample extends StatelessWidget {
+  const TreemapChartExample({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Treemap> nodes = [Treemap(value: 50, label: 'Node 1'), Treemap(value: 40, label: 'Node 2'), Treemap(value: 30, label: 'Node 3'), Treemap(value: 20, label: 'Node 4'), Treemap(value: 20, label: 'Node 5'), Treemap(value: 11, label: 'Node 6'), Treemap(value: 10, label: 'Node 7'), Treemap(value: 5, label: 'Node 8'), Treemap(value: 1, label: 'Node 9')];
+
+    return Column(
+      children: [
+        // ---------------------------------------------------
+        // Basic Example: Simple treemap with border
+        // ---------------------------------------------------
+        SizedBox(
+          height: 400, // Fixed height for treemap
+          child: FlutterTreemap(
+            nodes: nodes, // Pass dataset
+            border: Border.all(
+              color: Colors.white,
+            ), // Optional border around tiles
+          ),
+        ),
+
+        // Section heading for the second example
+        Text("Customized Tiles", style: Theme.of(context).textTheme.headlineSmall),
+
+        // ---------------------------------------------------
+        // Advanced Example: Custom tile builder & tooltip
+        // ---------------------------------------------------
+        SizedBox(
+          height: 400,
+          child: FlutterTreemap(
+            nodes: nodes,
+            border: Border.all(color: Colors.white),
+
+            // [tileWrapper] allows wrapping each tile with custom widgets.
+            // Here we add a tooltip showing the node label & value.
+            tileWrapper: (context, child, node, index, rect) {
+              return Tooltip(message: '${node.label}\nValue: ${node.value}', child: child);
+            },
+
+            // [tileBuilder] lets you override the default tile content.
+            // In this example, only the label is shown with custom text style.
+            tileBuilder: (context, node, index, rect) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    node.label ?? '',
+                    style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 10),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ],
     );
