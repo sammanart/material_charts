@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 
 import './treemap.dart';
 
+/// Plotly-compatible branchvalues modes
+enum BranchValuesMode { remainder, total }
+
 /// A widget that displays a **Treemap visualization**.
 ///
 /// Each [Treemap] node is drawn as a rectangle whose area is
@@ -74,6 +77,18 @@ class FlutterTreemap extends StatefulWidget {
   )?
   tileBuilder;
 
+  /// Controls how parent/child areas are computed.
+  ///
+  /// - [BranchValuesMode.remainder] (default): children occupy a portion of the
+  ///   parent equal to sum(children)/parent.value; leftover is implicit remainder.
+  /// - [BranchValuesMode.total]: children are normalized to fill the parent area.
+  final BranchValuesMode branchValuesMode;
+
+  /// Optional inset for nested rendering; if > 0, children are laid out inside
+  /// the parent rect with this padding on all sides, making nesting visually
+  /// obvious. When 0, children touch the parent edges.
+  final double nestedPadding;
+
   const FlutterTreemap({
     super.key,
     required this.nodes,
@@ -86,19 +101,108 @@ class FlutterTreemap extends StatefulWidget {
     this.border,
     this.tileBuilder,
     this.tileWrapper,
+    this.branchValuesMode = BranchValuesMode.remainder,
+    this.nestedPadding = 0.0,
   });
 
   @override
   State<FlutterTreemap> createState() => _FlutterTreemapState();
 }
 
+/// Tree node for hierarchical treemap layout.
+class _TreeNode {
+  final Treemap data;
+  final List<_TreeNode> children = [];
+  late double calculatedValue;
+
+  _TreeNode(this.data) {
+    // For leaf nodes, use the node value
+    // For parent nodes, sum of children will be calculated
+    calculatedValue = data.value;
+  }
+
+  void calculateValue() {
+    if (children.isEmpty) {
+      calculatedValue = data.value;
+    } else {
+      calculatedValue = children.fold(0.0, (sum, child) {
+        child.calculateValue();
+        return sum + child.calculatedValue;
+      });
+    }
+  }
+
+  bool get isLeaf => children.isEmpty;
+
+  double get ownValue => data.value.abs();
+}
+
 class _FlutterTreemapState extends State<FlutterTreemap> {
   double totalWeight = 0;
 
+  /// Build a hierarchical tree from flat node list (Plotly-style).
+  ///
+  /// Nodes with parent == "" or null are treated as roots.
+  /// Returns a list of root nodes with their children properly nested.
+  List<_TreeNode> _buildHierarchy(List<Treemap> nodes) {
+    // Create a map of label -> TreeNode for easy lookup
+    final nodeMap = <String?, _TreeNode>{};
+    for (final node in nodes) {
+      nodeMap[node.label] = _TreeNode(node);
+    }
+
+    // Build parent-child relationships
+    for (final node in nodes) {
+      if (!node.isRoot && node.parent != null && node.label != null) {
+        final parentNode = nodeMap[node.parent];
+        final childNode = nodeMap[node.label];
+        if (parentNode != null && childNode != null) {
+          parentNode.children.add(childNode);
+        }
+      }
+    }
+
+    // Calculate values for all nodes (for parent nodes, sum of children)
+    for (final treeNode in nodeMap.values) {
+      treeNode.calculateValue();
+    }
+
+    // Return only root nodes
+    return nodeMap.values.where((node) => node.data.isRoot).toList();
+  }
+
+  /// Check if the node list is hierarchical (has parent relationships).
+  bool _isHierarchical(List<Treemap> nodes) {
+    // Hierarchical if any node has a non-null, non-empty parent
+    return nodes.any((node) => node.parent != null && node.parent != '');
+  }
+
+  /// Flatten tree to display list (depth-first traversal).
+  List<_TreeNode> _flattenTree(List<_TreeNode> roots) {
+    final result = <_TreeNode>[];
+    for (final root in roots) {
+      _flattenTreeNode(root, result);
+    }
+    return result;
+  }
+
+  void _flattenTreeNode(_TreeNode node, List<_TreeNode> result) {
+    result.add(node);
+    for (final child in node.children) {
+      _flattenTreeNode(child, result);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Compute total weight (sum of all node values).
-    totalWeight = widget.nodes.fold(0.0, (sum, node) => sum + node.value);
+    // Check if data is hierarchical and build tree if needed
+    final isHierarchical = _isHierarchical(widget.nodes);
+    final List<_TreeNode> treeNodes = isHierarchical
+        ? _buildHierarchy(widget.nodes)
+        : widget.nodes.map((n) => _TreeNode(n)).toList();
+
+    // Compute total weight from root nodes (use own values for sibling sizing)
+    totalWeight = treeNodes.fold(0.0, (sum, node) => sum + node.ownValue);
 
     if (totalWeight == 0 || widget.nodes.isEmpty) {
       // No nodes → return empty widget.
@@ -107,22 +211,26 @@ class _FlutterTreemapState extends State<FlutterTreemap> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final rectangleMap = <Treemap, Rect>{};
+        final rectangleMap = <_TreeNode, Rect>{};
 
-        // Compute treemap layout within available constraints.
-        _squarify(
-          widget.nodes,
+        // Compute treemap layout for root nodes
+        _squarifyNodes(
+          treeNodes,
           Rect.fromLTWH(0, 0, constraints.maxWidth, constraints.maxHeight),
           rectangleMap,
         );
 
+        // Flatten tree to get display order (depth-first)
+        final displayNodes = _flattenTree(treeNodes);
+
         // Build treemap tiles.
         return Stack(
           clipBehavior: Clip.hardEdge,
-          children: widget.nodes.asMap().entries.map((entry) {
+          children: displayNodes.asMap().entries.map((entry) {
             final index = entry.key;
-            final node = entry.value;
-            final rect = rectangleMap[node];
+            final treeNode = entry.value;
+            final node = treeNode.data;
+            final rect = rectangleMap[treeNode];
             if (rect == null) return const SizedBox.shrink();
 
             final builtTile = _buildTile(node: node, rect: rect, index: index);
@@ -149,33 +257,73 @@ class _FlutterTreemapState extends State<FlutterTreemap> {
     );
   }
 
-  /// Recursive squarified treemap layout algorithm.
+  /// Recursive squarified treemap layout algorithm for hierarchical nodes.
   ///
   /// Splits rectangles into sub-rectangles based on node weights,
   /// attempting to keep aspect ratios close to `1:1`.
-  void _squarify(
-    List<Treemap> nodes,
+  /// For parent nodes with children, recursively layouts children within the parent's rectangle.
+  void _squarifyNodes(
+    List<_TreeNode> nodes,
     Rect rect,
-    Map<Treemap, Rect> rectangleMap,
+    Map<_TreeNode, Rect> rectangleMap,
   ) {
     if (nodes.isEmpty || rect.width <= 0 || rect.height <= 0) return;
 
-    // Base case: single node → fill the entire rect.
+    // Base case: single node
     if (nodes.length == 1) {
-      rectangleMap[nodes.first] = rect;
+      final node = nodes.first;
+      rectangleMap[node] = rect;
+
+      // If node has children, recursively layout them within this rectangle
+      if (node.children.isNotEmpty && !node.isLeaf) {
+        final childrenSum = node.children.fold(0.0, (s, c) => s + c.ownValue);
+        if (childrenSum > 0) {
+          if (widget.branchValuesMode == BranchValuesMode.total) {
+            // Children fill the full parent rectangle; sizes normalized automatically
+            final childRect = _deflate(rect);
+            _squarifyNodes(node.children, childRect, rectangleMap);
+          } else {
+            // remainder: children occupy a portion of the parent's area
+            final parentValue = node.ownValue;
+            if (parentValue > 0) {
+              final ratio = (childrenSum / parentValue).clamp(0.0, 1.0);
+              if (ratio > 0) {
+                final horizontal = rect.width >= rect.height;
+                Rect childRect = horizontal
+                    ? Rect.fromLTWH(
+                        rect.left,
+                        rect.top,
+                        rect.width * ratio,
+                        rect.height,
+                      )
+                    : Rect.fromLTWH(
+                        rect.left,
+                        rect.top,
+                        rect.width,
+                        rect.height * ratio,
+                      );
+                childRect = _deflate(childRect);
+                _squarifyNodes(node.children, childRect, rectangleMap);
+              }
+            }
+          }
+        }
+      }
       return;
     }
 
     final horizontal = (rect.width / rect.height) >= 1.0;
 
-    // Total adjusted weight (enforcing minTileRatio).
+    // Local total (raw sum) for this group
+    final localRawSum = nodes.fold(0.0, (sum, n) => sum + n.ownValue);
+    // Total adjusted weight (enforcing minTileRatio) using local sum
     final sumWeights = nodes.fold(
       0.0,
-      (sum, node) => sum + _adjustedWeight(node, rect),
+      (sum, node) => sum + _adjustedWeight(node, localRawSum),
     );
 
     // Find optimal split index.
-    int splitIndex = _findBestSplit(nodes, rect, sumWeights);
+    int splitIndex = _findBestSplitNodes(nodes, rect, sumWeights, localRawSum);
 
     // Split into two groups.
     final firstGroup = nodes.sublist(0, splitIndex);
@@ -184,7 +332,7 @@ class _FlutterTreemapState extends State<FlutterTreemap> {
     // Weight of the first group.
     final double firstWeight = firstGroup.fold(
       0.0,
-      (sum, node) => sum + _adjustedWeight(node, rect),
+      (sum, node) => sum + _adjustedWeight(node, localRawSum),
     );
 
     final double ratio = firstWeight / sumWeights;
@@ -214,24 +362,26 @@ class _FlutterTreemapState extends State<FlutterTreemap> {
     }
 
     // Recurse into sub-rectangles.
-    _squarify(firstGroup, rect1, rectangleMap);
-    _squarify(secondGroup, rect2, rectangleMap);
+    _squarifyNodes(firstGroup, rect1, rectangleMap);
+    _squarifyNodes(secondGroup, rect2, rectangleMap);
   }
 
   /// Returns adjusted node weight considering [minTileRatio].
-  double _adjustedWeight(Treemap node, Rect rect) {
-    double rawVal = node.value.abs();
-    double rectArea = rect.width * rect.height;
-    if (rectArea == 0) return rawVal;
-
-    // Ensure node does not shrink below minimum ratio.
-    double minWeight = totalWeight * widget.minTileRatio;
+  double _adjustedWeight(_TreeNode node, double localTotal) {
+    final double rawVal = node.ownValue;
+    // Ensure node does not shrink below minimum ratio relative to local group
+    final double minWeight = localTotal * widget.minTileRatio;
     return max(rawVal, minWeight);
   }
 
   /// Finds the best index to split the node list
   /// to minimize poor aspect ratios.
-  int _findBestSplit(List<Treemap> nodes, Rect rect, double sumWeights) {
+  int _findBestSplitNodes(
+    List<_TreeNode> nodes,
+    Rect rect,
+    double sumWeights,
+    double localRawSum,
+  ) {
     if (nodes.length <= 2) return 1;
 
     final horizontal = (rect.width / rect.height) >= 1.0;
@@ -244,11 +394,11 @@ class _FlutterTreemapState extends State<FlutterTreemap> {
 
       final firstWeight = firstGroup.fold(
         0.0,
-        (sum, node) => sum + _adjustedWeight(node, rect),
+        (sum, node) => sum + _adjustedWeight(node, localRawSum),
       );
       final secondWeight = secondGroup.fold(
         0.0,
-        (sum, node) => sum + _adjustedWeight(node, rect),
+        (sum, node) => sum + _adjustedWeight(node, localRawSum),
       );
 
       double splitDimension = horizontal
@@ -263,8 +413,8 @@ class _FlutterTreemapState extends State<FlutterTreemap> {
       }
 
       // Evaluate aspect ratios of both groups.
-      final aspect1 = _aspectRatio(firstWeight, rect, sumWeights, horizontal);
-      final aspect2 = _aspectRatio(secondWeight, rect, sumWeights, horizontal);
+      final aspect1 = _aspectRatioNode(firstWeight, rect, sumWeights, horizontal);
+      final aspect2 = _aspectRatioNode(secondWeight, rect, sumWeights, horizontal);
       final worstAspect = max(aspect1, aspect2);
 
       // Apply penalty for uneven splits.
@@ -283,7 +433,7 @@ class _FlutterTreemapState extends State<FlutterTreemap> {
   }
 
   /// Computes aspect ratio of a group’s rectangle.
-  double _aspectRatio(
+  double _aspectRatioNode(
     double groupWeight,
     Rect rect,
     double totalWeight,
@@ -303,6 +453,15 @@ class _FlutterTreemapState extends State<FlutterTreemap> {
 
     // Penalize extreme ratios more strongly.
     return aspect * (aspect > 2 ? 1.5 : 1.0);
+  }
+
+  Rect _deflate(Rect rect) {
+    final inset = widget.nestedPadding;
+    if (inset <= 0) return rect;
+    final w = rect.width - inset * 2;
+    final h = rect.height - inset * 2;
+    if (w <= 0 || h <= 0) return rect;
+    return Rect.fromLTWH(rect.left + inset, rect.top + inset, w, h);
   }
 
   /// Builds a single treemap tile.
