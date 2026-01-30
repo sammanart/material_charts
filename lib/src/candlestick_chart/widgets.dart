@@ -1,6 +1,9 @@
-import 'package:flutter/material.dart';
 import 'dart:math';
 
+import 'package:flutter/material.dart';
+import 'package:flutter_html/flutter_html.dart';
+
+import '../shared/shared_models.dart';
 import 'models.dart';
 import 'painter.dart';
 
@@ -199,6 +202,12 @@ class _MaterialCandlestickChartState extends State<MaterialCandlestickChart>
   /// Current mouse hover position
   Offset? _hoverPosition;
 
+  /// The currently active HTML tooltip for key events
+  KeyEventData? _activeHtmlTooltip;
+
+  /// Position of the active tooltip
+  Offset? _activeTooltipPosition;
+
   @override
   void initState() {
     super.initState();
@@ -264,6 +273,146 @@ class _MaterialCandlestickChartState extends State<MaterialCandlestickChart>
     });
   }
 
+  /// Pure hit-test for key event markers; returns matched tooltip and its position.
+  _TooltipHit _computeActiveTooltip(Rect chartArea, Offset pointerPosition) {
+    if (!widget.style.showKeyEventMarkers) {
+      return const _TooltipHit(null, null);
+    }
+
+    final config = widget.style.keyEventMarkerConfig ?? const KeyEventMarkerConfig();
+
+    // Check all candlesticks for key events
+    for (int i = 0; i < widget.data.length; i++) {
+      final candleData = widget.data[i];
+      if (candleData.keyEvent == null || !candleData.keyEvent!.hasHtmlContent) continue;
+
+      final keyEvent = candleData.keyEvent!;
+      final markerSize = keyEvent.markerSize ?? config.size;
+      final verticalOffset = keyEvent.verticalOffset ?? config.verticalOffset;
+
+      // Calculate marker position
+      final candleX = _getCandleX(i, chartArea);
+      final eff = _getEffectiveCandleWidth(chartArea, widget.data.length);
+      final high = candleData.high;
+      final low = widget.data.map((d) => d.low).reduce((a, b) => a < b ? a : b);
+      final highPrice = widget.data.map((d) => d.high).reduce((a, b) => a > b ? a : b);
+      final range = highPrice - low;
+      final highY = chartArea.bottom - ((high - low) / range * chartArea.height);
+
+      final markerOffset = Offset(
+        candleX + eff / 2,
+        highY - verticalOffset,
+      );
+
+      // Use marker size as hover radius
+      final hoverRadius = markerSize / 2;
+      final distance = (markerOffset - pointerPosition).distance;
+      if (distance <= hoverRadius) {
+        return _TooltipHit(keyEvent, markerOffset);
+      }
+    }
+
+    return const _TooltipHit(null, null);
+  }
+
+  /// Calculates the X position for a candlestick at the given index
+  double _getCandleX(int index, Rect chartArea) {
+    final eff = _getEffectiveCandleWidth(chartArea, widget.data.length);
+    final totalCandleWidth = eff * (1 + widget.style.spacing);
+    return chartArea.left + (totalCandleWidth * index) - _scrollOffset;
+  }
+
+  double _getEffectiveCandleWidth(Rect chartArea, int dataPointCount) {
+    final slots = dataPointCount <= 0 ? 1 : dataPointCount;
+    final slotWidth = chartArea.width / slots;
+    return min(widget.style.candleWidth, slotWidth * 0.8);
+  }
+
+  /// Updates the active HTML tooltip based on hover position
+  void _updateActiveTooltip(Rect chartArea, Offset pointerPosition) {
+    final result = _computeActiveTooltip(chartArea, pointerPosition);
+    _activeHtmlTooltip = result.tooltip;
+    _activeTooltipPosition = result.position;
+  }
+
+  /// Builds the HTML tooltip widget overlay
+  Widget _buildHtmlTooltip(double chartWidth, double chartHeight) {
+    if (_activeHtmlTooltip == null || _activeTooltipPosition == null) {
+      return const SizedBox.shrink();
+    }
+
+    final padding = widget.padding;
+    final opacity = _activeHtmlTooltip!.tooltipOpacity.clamp(0.0, 1.0);
+
+    // Use tooltip-specific dimensions if provided, otherwise use style defaults
+    final maxWidth = _activeHtmlTooltip!.tooltipMaxWidth ?? 300.0;
+    final maxHeight = _activeHtmlTooltip!.tooltipMaxHeight ?? 200.0;
+
+    // Calculate position (above the marker)
+    double left = _activeTooltipPosition!.dx - maxWidth / 2;
+    double top = _activeTooltipPosition!.dy - 120; // Approximate tooltip height offset
+
+    // Adjust if going outside bounds
+    final minLeft = padding.left;
+    final maxLeft = chartWidth - maxWidth - padding.right;
+    if (maxLeft >= minLeft) {
+      left = left.clamp(minLeft, maxLeft);
+    } else {
+      // Chart is narrower than tooltip; pin to left padding
+      left = minLeft;
+    }
+
+    if (top < padding.top) {
+      top = _activeTooltipPosition!.dy + 15; // Show below if not enough space above
+    }
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: IgnorePointer(
+        child: Material(
+          elevation: 0,
+          borderRadius: BorderRadius.circular(8),
+          color: Colors.transparent,
+          child: Container(
+            constraints: BoxConstraints(
+              maxWidth: maxWidth,
+              maxHeight: maxHeight,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: opacity),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: Colors.grey.withValues(alpha: 0.3),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(8),
+              child: Html(
+                data: _activeHtmlTooltip!.htmlContent,
+                style: {
+                  "*": Style(
+                    margin: Margins.zero,
+                    padding: HtmlPaddings.zero,
+                    backgroundColor: Colors.transparent,
+                  ),
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.data.isEmpty) {
@@ -306,36 +455,58 @@ class _MaterialCandlestickChartState extends State<MaterialCandlestickChart>
             onHover: (details) {
               setState(() {
                 _hoverPosition = details.localPosition; // Update hover position
+                // Calculate chart area and update active tooltip
+                final chartArea = Rect.fromLTWH(
+                  widget.padding.left + widget.axisConfig.yAxisWidth,
+                  widget.padding.top,
+                  widget.width - widget.padding.horizontal - widget.axisConfig.yAxisWidth,
+                  widget.height - widget.padding.vertical - widget.axisConfig.xAxisHeight,
+                );
+                _updateActiveTooltip(chartArea, details.localPosition);
               });
             },
             onExit: (_) =>
-                setState(() => _hoverPosition = null), // Clear on exit
-            child: Container(
-              decoration: BoxDecoration(
-                color: widget.backgroundColor,
-                border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-                borderRadius: BorderRadius.circular(4),
-              ),
+                setState(() {
+                  _hoverPosition = null; // Clear on exit
+                  _activeHtmlTooltip = null;
+                  _activeTooltipPosition = null;
+                }), // Clear on exit
+            child: SizedBox(
               width: widget.width,
               height: widget.height,
-              child: AnimatedBuilder(
-                animation: _animation,
-                builder: (context, _) {
-                  return CustomPaint(
-                    size: Size(widget.width, widget.height),
-                    painter: CandlestickChartPainter(
-                      data: widget.data,
-                      progress: _animation.value,
-                      style: widget.style,
-                      axisConfig: widget.axisConfig,
-                      padding: widget.padding,
-                      showGrid: widget.showGrid,
-                      scrollOffset: _scrollOffset,
-                      hoverPosition:
-                          _hoverPosition, // Pass hover position to painter
+              child: Stack(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: widget.backgroundColor,
+                      border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                      borderRadius: BorderRadius.circular(4),
                     ),
-                  );
-                },
+                    width: widget.width,
+                    height: widget.height,
+                    child: AnimatedBuilder(
+                      animation: _animation,
+                      builder: (context, _) {
+                        return CustomPaint(
+                          size: Size(widget.width, widget.height),
+                          painter: CandlestickChartPainter(
+                            data: widget.data,
+                            progress: _animation.value,
+                            style: widget.style,
+                            axisConfig: widget.axisConfig,
+                            padding: widget.padding,
+                            showGrid: widget.showGrid,
+                            scrollOffset: _scrollOffset,
+                            hoverPosition:
+                                _hoverPosition, // Pass hover position to painter
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  // HTML tooltip overlay for key events
+                  _buildHtmlTooltip(widget.width, widget.height),
+                ],
               ),
             ),
           ),
@@ -440,4 +611,11 @@ class PlotlyJsonValidator {
       return 'JSON parsing error: $e';
     }
   }
+}
+
+/// Simple tuple for tooltip hit results
+class _TooltipHit {
+  final KeyEventData? tooltip;
+  final Offset? position;
+  const _TooltipHit(this.tooltip, this.position);
 }

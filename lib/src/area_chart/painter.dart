@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../shared/shared_models.dart';
 import 'models.dart';
 
 /// Custom painter for rendering an area chart.

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_html/flutter_html.dart';
 
+import '../shared/shared_models.dart';
 import 'models.dart';
 import 'painter.dart';
 

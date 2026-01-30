@@ -1,9 +1,10 @@
-import 'package:flutter/material.dart';
-
-import 'dart:ui' as ui;
 import 'dart:math';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../shared/shared_models.dart';
 import 'models.dart';
 
 /// CandlestickChartPainter is a CustomPainter implementation for rendering candlestick charts.
@@ -106,6 +107,11 @@ class CandlestickChartPainter extends CustomPainter {
       );
     }
 
+    // Draw key event markers if enabled
+    if (style.showKeyEventMarkers) {
+      _drawKeyEventMarkers(canvas, chartArea);
+    }
+
     canvas.restore();
 
     // Draw axes labels outside the clipped area
@@ -124,7 +130,7 @@ class CandlestickChartPainter extends CustomPainter {
   /// Determines which candle is being hovered over based on x-coordinate
   /// Returns the index of the candle or null if none is found
   int? _getCandleIndexAtPosition(double x, Rect chartArea) {
-    final candleWidth = style.candleWidth;
+    final candleWidth = _getEffectiveCandleWidth(chartArea);
     // final totalCandleWidth = candleWidth * (1 + style.spacing);
 
     // Calculate which candle's position is at x
@@ -224,10 +230,16 @@ class CandlestickChartPainter extends CustomPainter {
   /// Calculates the x-coordinate for a given candle index
   /// Takes into account candleWidth, spacing, and scroll position
   double _getCandleX(int index, Rect chartArea) {
-    final candleWidth = style.candleWidth;
+    final candleWidth = _getEffectiveCandleWidth(chartArea);
     final candleSpacing = candleWidth * style.spacing;
     final totalCandleWidth = candleWidth + candleSpacing;
     return chartArea.left + (index * totalCandleWidth) - scrollOffset;
+  }
+
+  double _getEffectiveCandleWidth(Rect chartArea) {
+    final count = max(1, data.length);
+    final slotWidth = chartArea.width / count;
+    return min(style.candleWidth, slotWidth * 0.8);
   }
 
   /// Draws all visible candlesticks with animation
@@ -238,9 +250,9 @@ class CandlestickChartPainter extends CustomPainter {
     final low = data.map((d) => d.low).reduce(min);
     final priceRange = high - low;
 
-    // Calculate visible range
-    final candleWidth = style.candleWidth;
-    final totalCandleWidth = candleWidth * (1 + style.spacing);
+    // Calculate visible range using effective candle width
+    final candleWidthEff = _getEffectiveCandleWidth(chartArea);
+    final totalCandleWidth = candleWidthEff * (1 + style.spacing);
     final startIdx = max(0, (scrollOffset / totalCandleWidth).floor());
     final endIdx = min(
       data.length,
@@ -253,7 +265,7 @@ class CandlestickChartPainter extends CustomPainter {
       final x = _getCandleX(i, chartArea);
 
       // Skip if outside visible area
-      if (x + candleWidth < chartArea.left || x > chartArea.right) continue;
+      if (x + candleWidthEff < chartArea.left || x > chartArea.right) continue;
 
       final wickPaint = Paint()
         ..color = candle.isBullish ? style.bullishColor : style.bearishColor
@@ -275,8 +287,8 @@ class CandlestickChartPainter extends CustomPainter {
 
       // Draw wick
       canvas.drawLine(
-        Offset(x + candleWidth / 2, highY),
-        Offset(x + candleWidth / 2, lowY),
+        Offset(x + candleWidthEff / 2, highY),
+        Offset(x + candleWidthEff / 2, lowY),
         wickPaint,
       );
 
@@ -284,7 +296,7 @@ class CandlestickChartPainter extends CustomPainter {
       final bodyRect = Rect.fromLTWH(
         x,
         min(openY, closeY),
-        candleWidth,
+        candleWidthEff,
         (openY - closeY).abs(),
       );
       canvas.drawRect(bodyRect, candlePaint);
@@ -309,8 +321,8 @@ class CandlestickChartPainter extends CustomPainter {
     }
 
     // Vertical grid lines adjusted for scroll
-    final candleWidth = style.candleWidth;
-    final totalCandleWidth = candleWidth * (1 + style.spacing);
+    final candleWidthEff = _getEffectiveCandleWidth(chartArea);
+    final totalCandleWidth = candleWidthEff * (1 + style.spacing);
     final startIdx = (scrollOffset / totalCandleWidth).floor();
     final visibleCount = (chartArea.width / totalCandleWidth).ceil();
 
@@ -365,8 +377,8 @@ class CandlestickChartPainter extends CustomPainter {
   /// Handles scroll position when determining visible labels
   void _drawXAxisLabels(Canvas canvas, Rect chartArea) {
     final totalCandles = data.length;
-    final candleWidth = style.candleWidth;
-    final totalCandleWidth = candleWidth * (1 + style.spacing);
+    final candleWidthEff = _getEffectiveCandleWidth(chartArea);
+    final totalCandleWidth = candleWidthEff * (1 + style.spacing);
 
     // Calculate visible count for drawing labels
     final visibleCount = (chartArea.width / totalCandleWidth).ceil();
@@ -411,6 +423,65 @@ class CandlestickChartPainter extends CustomPainter {
         );
       }
     }
+  }
+
+  /// Draws key event markers above candlesticks
+  void _drawKeyEventMarkers(Canvas canvas, Rect chartArea) {
+    final config = style.keyEventMarkerConfig ?? const KeyEventMarkerConfig();
+    final progressCount = (data.length * progress).floor();
+
+    for (int i = 0; i < progressCount; i++) {
+      final candleData = data[i];
+      if (candleData.keyEvent == null) continue;
+
+      final keyEvent = candleData.keyEvent!;
+      final markerColor = keyEvent.markerColor ?? config.defaultColor;
+      final markerSize = keyEvent.markerSize ?? config.size;
+      final verticalOffset = keyEvent.verticalOffset ?? config.verticalOffset;
+
+      // Calculate marker position (above the high price)
+      final candleX = _getCandleX(i, chartArea);
+      final high = candleData.high;
+      final low = data.map((d) => d.low).reduce(min);
+      final highPrice = data.map((d) => d.high).reduce(max);
+      final range = highPrice - low;
+      final highY = chartArea.bottom - ((high - low) / range * chartArea.height);
+
+      final eff = _getEffectiveCandleWidth(chartArea);
+      final markerOffset = Offset(
+        candleX + eff / 2, // Center on the candlestick
+        highY - verticalOffset,
+      );
+
+      // Draw the main marker circle
+      final markerPaint = Paint()
+        ..color = markerColor
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(markerOffset, markerSize / 2, markerPaint);
+
+      // Check if we should show tooltip for this key event
+      if (hoverPosition != null) {
+        final distance = (markerOffset - hoverPosition!).distance;
+        // Use marker size as hover radius (cursor must be on the circle)
+        final hoverRadius = markerSize / 2;
+        if (distance <= hoverRadius) {
+          _drawKeyEventTooltip(canvas, markerOffset, keyEvent, chartArea);
+        }
+      }
+    }
+  }
+
+  /// Draws a rich tooltip for key events
+  /// HTML tooltips are rendered by the widget overlay, not here
+  void _drawKeyEventTooltip(
+    Canvas canvas,
+    Offset markerPosition,
+    KeyEventData keyEvent,
+    Rect chartArea,
+  ) {
+    // All tooltips are now HTML-based and rendered by the widget overlay
+    // If no HTML content is provided, nothing is displayed
+    return;
   }
 
   /// Determines whether the painter should repaint based on property changes

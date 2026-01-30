@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../shared/shared_models.dart';
+
 /// Represents a single data point in the area chart.
 class AreaChartData {
   final double value; // The value of the data point, plotted on the Y-axis.
@@ -379,55 +381,6 @@ class AreaCrosshairConfig {
     this.showLabel = true,
     this.labelStyle,
     this.labelBackgroundColor,
-  });
-}
-
-/// Represents key event data for special markers on the chart
-/// HTML content is required - if empty/null, no tooltip will be displayed
-class KeyEventData {
-  final String? htmlContent; // HTML string for rich tooltip content (required for tooltip display)
-  final Color? markerColor; // Color of the event marker
-  final double? markerSize; // Optional custom size for this marker (overrides config default)
-  final double? verticalOffset; // Optional custom vertical offset for this marker (overrides config default)
-  final double? tooltipMaxWidth; // Maximum width for the tooltip
-  final double? tooltipMaxHeight; // Maximum height for the tooltip
-  final double tooltipOpacity; // Opacity of the tooltip (0.0 to 1.0, default 1.0)
-
-  /// Creates a KeyEventData with HTML content for rich tooltips
-  /// Use the flutter_html package to render the HTML in the chart widget
-  /// If htmlContent is null or empty, no tooltip will be displayed
-  const KeyEventData({
-    required String htmlContent,
-    Color? markerColor,
-    double? markerSize,
-    double? verticalOffset,
-    double? tooltipMaxWidth,
-    double? tooltipMaxHeight,
-    double tooltipOpacity = 1.0,
-  }) : htmlContent = htmlContent,
-       markerColor = markerColor,
-       markerSize = markerSize,
-       verticalOffset = verticalOffset,
-       tooltipMaxWidth = tooltipMaxWidth,
-       tooltipMaxHeight = tooltipMaxHeight,
-       tooltipOpacity = tooltipOpacity;
-  
-  /// Whether this event has HTML content
-  bool get hasHtmlContent => htmlContent != null && htmlContent!.isNotEmpty;
-}
-
-/// Configuration for key event markers
-class KeyEventMarkerConfig {
-  final double size; // Size of the marker
-  final Color defaultColor; // Default color for markers
-  final double verticalOffset; // Offset above the line
-  final double minHoverRadius; // Minimum hover radius for tooltip detection (ensures visibility even on small canvases)
-
-  const KeyEventMarkerConfig({
-    this.size = 10.0,
-    this.defaultColor = Colors.orange,
-    this.verticalOffset = 18.0,
-    this.minHoverRadius = 15.0,
   });
 }
 

@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
 
 import '../shared/shared_models.dart';
 
@@ -50,6 +51,13 @@ class CandlestickData {
   /// data is not available.
   final double? volume;
 
+  /// Optional key event data for special markers
+  ///
+  /// This field can hold information about significant events
+  /// that occurred at this specific candlestick, such as earnings
+  /// announcements, dividends, or other market events.
+  final KeyEventData? keyEvent;
+
   const CandlestickData({
     required this.date,
     required this.open,
@@ -57,6 +65,7 @@ class CandlestickData {
     required this.low,
     required this.close,
     this.volume,
+    this.keyEvent,
   });
 
   /// Determines whether this is a bullish (green) or bearish (red) candlestick.
@@ -104,6 +113,7 @@ class CandlestickData {
       low: parseDouble(low[index]),
       close: parseDouble(close[index]),
       volume: volume != null ? parseDouble(volume[index]) : null,
+      keyEvent: null, // Key events should be added manually after parsing
     );
   }
 }
@@ -177,6 +187,12 @@ class CandlestickStyle {
   /// Styling configuration for tooltips associated with candlesticks.
   final TooltipStyle tooltipStyle;
 
+  /// Whether to show key event markers on the chart.
+  final bool showKeyEventMarkers;
+
+  /// Configuration for key event markers appearance.
+  final KeyEventMarkerConfig? keyEventMarkerConfig;
+
   const CandlestickStyle({
     this.bullishColor = Colors.green,
     this.bearishColor = Colors.red,
@@ -188,6 +204,8 @@ class CandlestickStyle {
     this.verticalLineColor = Colors.blue, // Default color
     this.verticalLineWidth = 1.0, // Default width
     this.tooltipStyle = const TooltipStyle(),
+    this.showKeyEventMarkers = true,
+    this.keyEventMarkerConfig,
   });
 }
 

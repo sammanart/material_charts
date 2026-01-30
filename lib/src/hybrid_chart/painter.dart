@@ -1,0 +1,965 @@
+import 'dart:math';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+
+import '../shared/shared_models.dart';
+import 'models.dart';
+
+/// Unified painter for rendering both area and candlestick charts
+class HybridChartPainter extends CustomPainter {
+  final List<HybridChartSeries> series;
+  final double progress;
+  final HybridChartStyle style;
+  final HybridChartAxisConfig axisConfig;
+  final Offset? hoverPosition;
+  final HybridChartType chartType;
+  final double scrollOffset;
+
+  HybridChartPainter({
+    required this.series,
+    required this.progress,
+    required this.style,
+    required this.axisConfig,
+    required this.chartType,
+    this.hoverPosition,
+    this.scrollOffset = 0.0,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (series.isEmpty || series[0].dataPoints.isEmpty) return;
+
+    final chartArea = Rect.fromLTWH(
+      style.padding.left + axisConfig.yAxisWidth,
+      style.padding.top,
+      size.width - style.padding.horizontal - axisConfig.yAxisWidth,
+      size.height - style.padding.vertical - axisConfig.xAxisHeight,
+    );
+
+    canvas.save();
+    canvas.clipRect(chartArea);
+
+    // Draw chart area background
+    if (style.chartAreaBackgroundColor != Colors.transparent) {
+      final bgPaint = Paint()
+        ..color = style.chartAreaBackgroundColor
+        ..style = PaintingStyle.fill;
+      canvas.drawRect(chartArea, bgPaint);
+    }
+
+    _drawAxes(canvas, chartArea);
+    if (style.showGrid) _drawGrid(canvas, chartArea);
+    _drawVerticalLines(canvas, chartArea);
+
+    // Draw volume bars (beneath area/lines and candlesticks)
+    if (style.showVolume) {
+      _drawVolumeBars(canvas, chartArea);
+    }
+
+    // Draw based on chart type
+    if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
+      _drawAreaChart(canvas, chartArea, skipFill: chartType != HybridChartType.area, singleSeries: chartType == HybridChartType.line);
+    } else {
+      _drawCandlestickChart(canvas, chartArea);
+    }
+
+    // Draw baseline if enabled
+    if (style.baseline?.show == true && (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line)) {
+      _drawBaseline(canvas, chartArea);
+    }
+
+    // Draw crosshair lines if enabled and a hover position is available
+    if (style.crosshair?.enabled == true && hoverPosition != null) {
+      _drawCrosshairLines(canvas, chartArea);
+    } else if (hoverPosition != null) {
+      // Draw simple vertical line if crosshair is disabled
+      _drawVerticalLine(canvas, chartArea);
+    }
+
+    canvas.restore();
+
+    // Draw key event markers outside clipped area
+    if (style.showKeyEventMarkers) {
+      _drawKeyEventMarkers(canvas, chartArea);
+    }
+
+    // Draw axis labels outside clipped area
+    _drawYAxisLabels(canvas, chartArea);
+    _drawXAxisLabels(canvas, chartArea);
+    // Draw axis titles/legends if provided
+    _drawAxisTitles(canvas, chartArea);
+
+    // Draw volume tooltip on top of chart elements (so it appears above crosshair lines)
+    if (style.showVolume && style.showVolumeTooltip && hoverPosition != null) {
+      final volInfo = _getHoveredVolumeBarInfo(chartArea);
+      if (volInfo != null) {
+        _drawVolumeTooltip(canvas, volInfo, chartArea);
+      }
+    }
+
+    // Draw crosshair labels last so they appear on top
+    if (style.crosshair?.enabled == true && hoverPosition != null && style.crosshair!.showLabel) {
+      _drawCrosshairLabels(canvas, chartArea);
+    }
+  }
+
+  void _drawVolumeBars(Canvas canvas, Rect chartArea) {
+    if (series.isEmpty) return;
+
+    // We'll use the first series' data points for volume
+    final dataPoints = series[0].dataPoints;
+    if (dataPoints.isEmpty) return;
+
+    final volumes = dataPoints.map((d) => d.volume ?? 0.0).toList();
+    final maxVol = volumes.isEmpty ? 0.0 : volumes.reduce((a, b) => a > b ? a : b);
+    if (maxVol <= 0) return;
+
+    final slots = style.xSpanSlots ?? dataPoints.length;
+    final count = min(dataPoints.length, slots);
+
+    final availableWidth = chartArea.width;
+    final slotWidth = availableWidth / (slots > 0 ? slots : 1);
+    final barMaxHeight = chartArea.height * style.volumeBarHeightRatio.clamp(0.0, 1.0);
+
+    final paint = Paint()
+      ..color = style.volumeBarColor.withValues(alpha: style.volumeBarOpacity)
+      ..style = PaintingStyle.fill;
+
+    for (int i = 0; i < count; i++) {
+      final vol = volumes[i];
+      if (vol <= 0) continue;
+
+      // X position: center within slot
+      final xCenter = chartArea.left + (slotWidth * i) + slotWidth / 2;
+      final barWidth = min(style.volumeBarWidth, slotWidth * 0.8);
+
+      final height = (vol / maxVol) * barMaxHeight;
+      final top = chartArea.bottom - height;
+
+      final rect = Rect.fromLTWH(xCenter - barWidth / 2, top, barWidth, height);
+      canvas.drawRect(rect, paint);
+    }
+  }
+
+  /// Returns hovered volume info if the hoverPosition falls on a volume bar.
+  Map<String, dynamic>? _getHoveredVolumeBarInfo(Rect chartArea) {
+    if (series.isEmpty) return null;
+    final dataPoints = series[0].dataPoints;
+    if (dataPoints.isEmpty) return null;
+
+    final volumes = dataPoints.map((d) => d.volume ?? 0.0).toList();
+    final maxVol = volumes.isEmpty ? 0.0 : volumes.reduce((a, b) => a > b ? a : b);
+    if (maxVol <= 0) return null;
+
+    final slots = style.xSpanSlots ?? dataPoints.length;
+    final count = min(dataPoints.length, slots);
+
+    final availableWidth = chartArea.width;
+    final slotWidth = availableWidth / (slots > 0 ? slots : 1);
+    final barMaxHeight = chartArea.height * style.volumeBarHeightRatio.clamp(0.0, 1.0);
+
+    for (int i = 0; i < count; i++) {
+      final vol = volumes[i];
+      if (vol <= 0) continue;
+
+      final xCenter = chartArea.left + (slotWidth * i) + slotWidth / 2;
+      final barWidth = min(style.volumeBarWidth, slotWidth * 0.8);
+      final height = (vol / maxVol) * barMaxHeight;
+      final top = chartArea.bottom - height;
+      final rect = Rect.fromLTWH(xCenter - barWidth / 2, top, barWidth, height);
+      if (hoverPosition != null && rect.contains(hoverPosition!)) {
+        return {'rect': rect, 'vol': vol, 'xCenter': xCenter, 'top': top, 'barWidth': barWidth};
+      }
+    }
+
+    return null;
+  }
+
+  void _drawVolumeTooltip(Canvas canvas, Map<String, dynamic> info, Rect chartArea) {
+    final vol = info['vol'] as double;
+    final xCenter = info['xCenter'] as double;
+    final top = info['top'] as double;
+    // final barWidth = info['barWidth'] as double; (unused)
+
+    final volText = vol % 1 == 0 ? vol.toInt().toString() : _formatNumber(vol);
+    final textStyle = TextStyle(color: style.volumeTooltipTextColor, fontSize: 12);
+    final span = TextSpan(text: volText, style: textStyle);
+    final tp = TextPainter(text: span, textDirection: TextDirection.ltr)..layout();
+
+    final tooltipPaddingH = 6.0;
+    final tooltipPaddingV = 4.0;
+    double tx = xCenter - tp.width / 2 - tooltipPaddingH;
+    double tw = tp.width + tooltipPaddingH * 2;
+    if (tx < chartArea.left) tx = chartArea.left + 2;
+    if (tx + tw > chartArea.right) tx = chartArea.right - tw - 2;
+    final ty = (top - tp.height - tooltipPaddingV * 2 - 6).clamp(chartArea.top, chartArea.bottom - tp.height - tooltipPaddingV * 2);
+
+    final tooltipRect = Rect.fromLTWH(tx, ty, tw, tp.height + tooltipPaddingV * 2);
+    final tooltipPaint = Paint()..color = style.volumeTooltipBackgroundColor.withOpacity(style.volumeTooltipOpacity.clamp(0.0, 1.0));
+    canvas.drawRRect(RRect.fromRectAndRadius(tooltipRect, Radius.circular(style.volumeTooltipBorderRadius)), tooltipPaint);
+    tp.paint(canvas, Offset(tooltipRect.left + tooltipPaddingH, tooltipRect.top + tooltipPaddingV));
+  }
+
+  void _drawAreaChart(Canvas canvas, Rect chartArea, {bool skipFill = false, bool singleSeries = false}) {
+    final seriesToDraw = singleSeries ? series.sublist(0, 1) : series;
+    for (int seriesIdx = 0; seriesIdx < seriesToDraw.length; seriesIdx++) {
+      final seriesData = seriesToDraw[seriesIdx];
+      final color = seriesData.color ?? style.colors[seriesIdx % style.colors.length];
+      final topFill = color.withValues(alpha: style.areaFillOpacityTop.clamp(0.0, 1.0));
+      final bottomFill = color.withValues(alpha: style.areaFillOpacityBottom.clamp(0.0, 1.0));
+
+      // Calculate points
+      final points = _getAreaChartPoints(chartArea, seriesData);
+      if (points.isEmpty) continue;
+
+      // Animate area/line drawing based on progress: build an interpolated subset of points
+      List<Offset> animatedPoints = points;
+      if (progress > 0.0 && progress < 1.0 && points.length >= 2) {
+        final maxIndex = points.length - 1;
+        final pos = progress * maxIndex;
+        final idx = pos.floor();
+        final frac = pos - idx;
+        animatedPoints = points.sublist(0, idx + 1);
+        if (idx + 1 <= maxIndex) {
+          final a = points[idx];
+          final b = points[idx + 1];
+          final interp = Offset(ui.lerpDouble(a.dx, b.dx, frac)!, ui.lerpDouble(a.dy, b.dy, frac)!);
+          animatedPoints.add(interp);
+        }
+      }
+
+      // Draw area fill only if not skipped (i.e., for area chart, not for multi-line)
+      if (!skipFill) {
+        _drawAreaFill(canvas, chartArea, animatedPoints, topFill, bottomFill);
+      }
+
+      // Draw line
+      _drawAreaLine(canvas, animatedPoints, color);
+
+      // Draw points (only for those included in animatedPoints)
+      if (style.showPoints) {
+        _drawAreaPoints(canvas, animatedPoints, color);
+      }
+    }
+  }
+
+  void _drawCandlestickChart(Canvas canvas, Rect chartArea) {
+    if (series.isEmpty) return;
+    final seriesData = series[0]; // Candlestick typically has one series
+    // Use `close` as a fallback when high/low are nullable (models allow nulls).
+    final high = seriesData.dataPoints.map((d) => d.high ?? d.close).reduce(max);
+    final lowest = seriesData.dataPoints.map((d) => d.low ?? d.close).reduce(min);
+    final low = style.forceYAxisFromZero ? 0.0 : lowest;
+    final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+    final range = (high + maxOffset) - low;
+
+    // Limit candlesticks based on xSpanSlots
+    final slots = style.xSpanSlots ?? seriesData.dataPoints.length;
+    final maxCandles = min(seriesData.dataPoints.length, slots);
+    final progressCount = (maxCandles * progress).floor();
+
+    for (int i = 0; i < progressCount; i++) {
+      final data = seriesData.dataPoints[i];
+
+      final candleX = _getCandleX(i, chartArea, seriesData.dataPoints.length);
+      final effectiveWidth = _getEffectiveCandleWidth(chartArea, seriesData.dataPoints.length);
+      final openVal = data.open ?? data.close;
+      final highVal = data.high ?? data.close;
+      final lowVal = data.low ?? data.close;
+
+      final openY = chartArea.bottom - ((openVal - low) / range * chartArea.height);
+      final closeY = chartArea.bottom - ((data.close - low) / range * chartArea.height);
+      final highY = chartArea.bottom - ((highVal - low) / range * chartArea.height);
+      final lowY = chartArea.bottom - ((lowVal - low) / range * chartArea.height);
+
+      final color = data.isBullish ? style.bullishColor : style.bearishColor;
+
+      // Draw wick
+      final wickPaint = Paint()
+        ..color = color
+        ..strokeWidth = style.wickWidth;
+      canvas.drawLine(Offset(candleX + effectiveWidth / 2, highY),
+          Offset(candleX + effectiveWidth / 2, lowY), wickPaint);
+
+      // Draw body
+      final bodyRect = Rect.fromLTRB(
+        candleX,
+        min(openY, closeY),
+        candleX + effectiveWidth,
+        max(openY, closeY),
+      );
+      final bodyPaint = Paint()
+        ..color = color
+        ..style = PaintingStyle.fill;
+      canvas.drawRect(bodyRect, bodyPaint);
+    }
+  }
+
+  void _drawAreaFill(Canvas canvas, Rect chartArea, List<Offset> points, Color topColor, Color bottomColor) {
+    final path = Path();
+    path.moveTo(points.first.dx, chartArea.bottom);
+    path.lineTo(points.first.dx, points.first.dy);
+
+    for (int i = 1; i < points.length; i++) {
+      path.lineTo(points[i].dx, points[i].dy);
+    }
+
+    path.lineTo(points.last.dx, chartArea.bottom);
+    path.close();
+
+    final paint = Paint()
+      ..shader = ui.Gradient.linear(
+        Offset(0, points.isEmpty ? 0 : points[0].dy),
+        Offset(0, chartArea.bottom),
+        [topColor, bottomColor],
+      );
+
+    canvas.drawPath(path, paint);
+  }
+
+  void _drawAreaLine(Canvas canvas, List<Offset> points, Color color) {
+    if (points.length < 2) return;
+
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = style.defaultLineWidth
+      ..style = PaintingStyle.stroke;
+
+    final path = Path();
+    path.moveTo(points[0].dx, points[0].dy);
+    for (int i = 1; i < points.length; i++) {
+      path.lineTo(points[i].dx, points[i].dy);
+    }
+
+    canvas.drawPath(path, paint);
+  }
+
+  void _drawAreaPoints(Canvas canvas, List<Offset> points, Color color) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    for (final point in points) {
+      canvas.drawCircle(point, style.defaultPointSize / 2, paint);
+    }
+  }
+
+  List<Offset> _getAreaChartPoints(Rect chartArea, HybridChartSeries seriesData) {
+    if (seriesData.dataPoints.isEmpty) return [];
+
+    final dataPoints = seriesData.dataPoints;
+    if (dataPoints.isEmpty) return [];
+
+    // Calculate min and max values using the series' reported `value` (area chart uses `value`)
+    final allValues = series.expand((s) => s.dataPoints.map((d) => d.value));
+    final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+    final maxValue = allValues.reduce((a, b) => a > b ? a : b) + maxOffset;
+    final minValue = style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
+    final valueRange = maxValue - minValue;
+
+    // Use xSpanSlots if defined to spread points across total slots
+    final slots = style.xSpanSlots ?? dataPoints.length;
+    final count = dataPoints.length < slots ? dataPoints.length : slots;
+    
+    return List.generate(count, (i) {
+      final x = _getXCoordinate(chartArea, i, dataPoints.length);
+      final normalizedValue = (dataPoints[i].value - minValue) / valueRange;
+      final y = chartArea.bottom - (normalizedValue * chartArea.height);
+      return Offset(x, y);
+    });
+  }
+
+  double _getXCoordinate(Rect chartArea, int index, int totalPoints) {
+    // Calculate X position based on xSpanSlots if defined
+    final slots = style.xSpanSlots ?? totalPoints;
+    final denom = (slots - 1) <= 0 ? 1 : (slots - 1);
+    return chartArea.left + (chartArea.width / denom) * index;
+  }
+
+  double _getCandleX(int index, Rect chartArea, int dataPointCount) {
+    // Calculate width per candle using xSpanSlots if defined
+    final slots = style.xSpanSlots ?? dataPointCount;
+    final availableWidth = chartArea.width;
+    final candleSpacing = availableWidth / (slots > 0 ? slots : 1);
+    final effectiveWidth = min(style.candleWidth, candleSpacing * 0.8);
+    final candleX = chartArea.left + (candleSpacing * index) + (candleSpacing - effectiveWidth) / 2;
+    return candleX;
+  }
+
+  double _getEffectiveCandleWidth(Rect chartArea, int dataPointCount) {
+    final slots = style.xSpanSlots ?? dataPointCount;
+    final availableWidth = chartArea.width;
+    final slotWidth = availableWidth / (slots > 0 ? slots : 1);
+    return min(style.candleWidth, slotWidth * 0.8);
+  }
+
+  /// Calculate Y pixel position from a value, accounting for chart type and offset settings
+  double _valueToYPixel(double value, Rect chartArea, HybridChartSeries seriesData) {
+    if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
+      // Area chart scaling
+      final allValues = series.expand((s) => s.dataPoints.map((d) => d.value));
+      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+      final maxValue = allValues.reduce((a, b) => a > b ? a : b) + maxOffset;
+      final minValue = style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
+      final valueRange = maxValue - minValue;
+      final normalizedValue = (value - minValue) / valueRange;
+      return chartArea.bottom - (normalizedValue * chartArea.height);
+    } else {
+      // Candlestick scaling (use `close` as fallback when OHLC are nullable)
+      final high = seriesData.dataPoints.map((d) => d.high ?? d.close).reduce(max);
+      final lowest = seriesData.dataPoints.map((d) => d.low ?? d.close).reduce(min);
+      final low = style.forceYAxisFromZero ? 0.0 : lowest;
+      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+      final range = (high + maxOffset) - low;
+      return chartArea.bottom - ((value - low) / range * chartArea.height);
+    }
+  }
+
+  /// Format numbers for display on Y axis and crosshair labels.
+  /// If the value has no fractional part (e.g. 123.00) show as integer `123`.
+  String _formatNumber(double v) {
+    final s = v.toStringAsFixed(2);
+    if (s.endsWith('.00')) return v.toInt().toString();
+    return s;
+  }
+
+  void _drawKeyEventMarkers(Canvas canvas, Rect chartArea) {
+    final config = style.keyEventMarkerConfig ?? const KeyEventMarkerConfig();
+
+    for (int seriesIdx = 0; seriesIdx < series.length; seriesIdx++) {
+      final seriesData = series[seriesIdx];
+
+      // Determine how many data points to process based on chart type and xSpanSlots
+      int maxPoints = seriesData.dataPoints.length;
+      if (chartType == HybridChartType.candlestick) {
+        final slots = style.xSpanSlots ?? seriesData.dataPoints.length;
+        maxPoints = min(seriesData.dataPoints.length, slots);
+      }
+
+      for (int i = 0; i < maxPoints; i++) {
+        final data = seriesData.dataPoints[i];
+        if (data.keyEvent == null) continue;
+
+        final keyEvent = data.keyEvent!;
+        final markerColor = keyEvent.markerColor ?? config.defaultColor;
+        final markerSize = keyEvent.markerSize ?? config.size;
+        final verticalOffset = keyEvent.verticalOffset ?? config.verticalOffset;
+
+        Offset markerOffset;
+
+        if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
+          final points = _getAreaChartPoints(chartArea, seriesData);
+          if (i >= points.length) continue;
+          markerOffset = Offset(points[i].dx, points[i].dy - verticalOffset);
+        } else {
+          // Use data.high (or fallback to close) for marker position, properly scaled with offset
+          final markerY = _valueToYPixel(data.high ?? data.close, chartArea, seriesData);
+          final candleX = _getCandleX(i, chartArea, seriesData.dataPoints.length);
+          final effWidth = _getEffectiveCandleWidth(chartArea, seriesData.dataPoints.length);
+          markerOffset = Offset(candleX + effWidth / 2, markerY - verticalOffset);
+        }
+
+        // Draw marker
+        final markerPaint = Paint()
+          ..color = markerColor
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(markerOffset, markerSize / 2, markerPaint);
+      }
+    }
+  }
+
+  void _drawVerticalLine(Canvas canvas, Rect chartArea) {
+    final paint = Paint()
+      ..color = style.verticalLineColor
+      ..strokeWidth = style.verticalLineWidth;
+
+    canvas.drawLine(
+      Offset(hoverPosition!.dx, chartArea.top),
+      Offset(hoverPosition!.dx, chartArea.bottom),
+      paint,
+    );
+  }
+
+  /// Draws the crosshair lines (vertical and horizontal).
+  void _drawCrosshairLines(Canvas canvas, Rect chartArea) {
+    if (hoverPosition == null || style.crosshair == null) return;
+
+    final cfg = style.crosshair!;
+    final paint = Paint()
+      ..color = cfg.lineColor
+      ..strokeWidth = cfg.lineWidth;
+
+    // Draw based on singleCrosshair flag and orientation
+    if (style.singleCrosshair == true) {
+      // Only one line: orientation chooses which
+      if (style.singleCrosshairOrientation == SingleCrosshairOrientation.horizontal) {
+        // Horizontal only
+        canvas.drawLine(
+          Offset(chartArea.left, hoverPosition!.dy),
+          Offset(chartArea.right, hoverPosition!.dy),
+          paint,
+        );
+      } else {
+        // Vertical only
+        canvas.drawLine(
+          Offset(hoverPosition!.dx, chartArea.top),
+          Offset(hoverPosition!.dx, chartArea.bottom),
+          paint,
+        );
+      }
+    } else {
+      // Full crosshair: draw both
+      canvas.drawLine(
+        Offset(hoverPosition!.dx, chartArea.top),
+        Offset(hoverPosition!.dx, chartArea.bottom),
+        paint,
+      );
+      canvas.drawLine(
+        Offset(chartArea.left, hoverPosition!.dy),
+        Offset(chartArea.right, hoverPosition!.dy),
+        paint,
+      );
+    }
+  }
+
+  /// Draws labels for crosshair (Y value and X label if available).
+  void _drawCrosshairLabels(Canvas canvas, Rect chartArea) {
+    if (hoverPosition == null || style.crosshair == null) return;
+
+    final cfg = style.crosshair!;
+    // Use the same text style as axis labels for consistency
+    final baseTextStyle = style.labelStyle ?? const TextStyle(fontSize: 12, color: Colors.grey);
+    final textStyle = cfg.labelStyle ?? baseTextStyle;
+    // Determine background color/paint for labels so X label can still use it when Y label is omitted
+    Color bgColor = cfg.labelBackgroundColor ?? style.backgroundColor;
+    if (textStyle.backgroundColor != null) {
+      bgColor = textStyle.backgroundColor!;
+    }
+
+    final bgPaint = Paint()
+      ..color = bgColor
+      ..style = PaintingStyle.fill;
+
+    // Y-axis value label
+    // Show Y label when not using singleCrosshair (full crosshair),
+    // or when singleCrosshair is horizontal (we place the label at the right next to the horizontal line).
+    double yVal = 0.0;
+    if (!style.singleCrosshair || style.singleCrosshairOrientation == SingleCrosshairOrientation.horizontal) {
+      if ((chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) && series.isNotEmpty) {
+      // For area chart, calculate Y value from the chart area
+      final minY = style.forceYAxisFromZero
+        ? 0.0
+        : series
+          .expand((s) => s.dataPoints.map((d) => d.value))
+          .reduce((a, b) => a < b ? a : b);
+      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+        final maxY = series
+          .expand((s) => s.dataPoints.map((d) => d.value))
+          .reduce((a, b) => a > b ? a : b) + maxOffset;
+      final normalizedY = (chartArea.bottom - hoverPosition!.dy) / chartArea.height;
+      yVal = minY + (normalizedY * (maxY - minY));
+    } else if (chartType == HybridChartType.candlestick && series.isNotEmpty) {
+      // For candlestick chart, use close price or estimate from height
+      final minY = style.forceYAxisFromZero
+        ? 0.0
+        : series
+          .expand((s) => s.dataPoints.map((d) => d.low ?? d.close))
+          .reduce((a, b) => a < b ? a : b);
+      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+        final maxY = series
+          .expand((s) => s.dataPoints.map((d) => d.high ?? d.close))
+          .reduce((a, b) => a > b ? a : b) + maxOffset;
+      final normalizedY = (chartArea.bottom - hoverPosition!.dy) / chartArea.height;
+      yVal = minY + (normalizedY * (maxY - minY));
+    }
+      final yText = _formatNumber(yVal);
+      final ySpan = TextSpan(text: yText, style: textStyle);
+      final yPainter = TextPainter(text: ySpan, textDirection: TextDirection.ltr)..layout();
+
+        // Position: for horizontal single crosshair we force the label to the right
+        final yLabelX = (style.singleCrosshair == true && style.singleCrosshairOrientation == SingleCrosshairOrientation.horizontal)
+          ? chartArea.right + 8
+          : (axisConfig.yAxisPosition == YAxisPosition.right
+            ? chartArea.right + 8
+            : chartArea.left - yPainter.width - 8 - 4);
+
+      final yRect = Rect.fromLTWH(
+        yLabelX,
+        (hoverPosition!.dy - yPainter.height / 2)
+            .clamp(chartArea.top, chartArea.bottom - yPainter.height),
+        yPainter.width + 4,
+        yPainter.height + 2,
+      );
+
+      canvas.drawRect(yRect, bgPaint);
+      yPainter.paint(canvas, Offset(yRect.left + 2, yRect.top + 1));
+    }
+
+    // X-axis label from nearest index
+    // Draw bottom X label when not using singleCrosshair (full crosshair),
+    // or when singleCrosshair orientation is vertical (keep legacy bottom label for vertical single crosshair).
+    if ((!style.singleCrosshair || style.singleCrosshairOrientation == SingleCrosshairOrientation.vertical)
+      && series.isNotEmpty && series.first.dataPoints.isNotEmpty) {
+      final rawCount = series.first.dataPoints.length;
+      final slots = style.xSpanSlots ?? rawCount;
+      final count = min(rawCount, slots);
+      final denom = (slots - 1) <= 0 ? 1 : (slots - 1);
+
+      final t = ((hoverPosition!.dx - chartArea.left) / chartArea.width).clamp(0.0, 1.0);
+      final slotIdx = (t * denom).round();
+      final idx = slotIdx.clamp(0, count - 1);
+      final label = series.first.dataPoints[idx].label;
+
+      // Only display X-axis crosshair label when it's non-null and non-empty
+      if (label.trim().isNotEmpty) {
+        final xSpan = TextSpan(text: label, style: textStyle);
+        final xPainter = TextPainter(text: xSpan, textDirection: TextDirection.ltr)..layout();
+
+        final xY = axisConfig.xAxisPosition == XAxisPosition.top
+          ? (chartArea.top - xPainter.height - 8)
+          : (chartArea.bottom + 8);
+        final xRect = Rect.fromLTWH(
+          (hoverPosition!.dx - xPainter.width / 2)
+              .clamp(chartArea.left, chartArea.right - xPainter.width),
+          xY,
+          xPainter.width + 4,
+          xPainter.height + 2,
+        );
+
+        canvas.drawRect(xRect, bgPaint);
+        xPainter.paint(canvas, Offset(xRect.left + 2, xRect.top + 1));
+      }
+    }
+  }
+
+  void _drawAxes(Canvas canvas, Rect chartArea) {
+    // Y-axis with configurable color, stroke width, and opacity
+    final yAxisPaint = Paint()
+      ..color = style.yAxisColor.withValues(alpha: style.yAxisOpacity)
+      ..strokeWidth = style.yAxisStrokeWidth;
+
+    // Choose X position for Y-axis based on configured position (left/right)
+    final double yAxisX = axisConfig.yAxisPosition == YAxisPosition.right ? chartArea.right : chartArea.left;
+    // Determine where the X-axis is drawn so we don't overlap axes
+    final double xAxisY = axisConfig.xAxisPosition == XAxisPosition.top ? chartArea.top : chartArea.bottom;
+    final double yAxisStart = chartArea.top + (axisConfig.xAxisPosition == XAxisPosition.top ? style.xAxisStrokeWidth / 2 : 0.0);
+    final double yAxisEnd = chartArea.bottom - (axisConfig.xAxisPosition == XAxisPosition.bottom ? style.xAxisStrokeWidth / 2 : 0.0);
+    canvas.drawLine(
+      Offset(yAxisX, yAxisStart),
+      Offset(yAxisX, yAxisEnd),
+      yAxisPaint,
+    );
+
+    // X-axis with configurable color, stroke width, and opacity
+    final xAxisPaint = Paint()
+      ..color = style.xAxisColor.withValues(alpha: style.xAxisOpacity)
+      ..strokeWidth = style.xAxisStrokeWidth;
+
+    final double xAxisYPos = axisConfig.xAxisPosition == XAxisPosition.top ? chartArea.top : chartArea.bottom;
+    canvas.drawLine(
+      Offset(chartArea.left, xAxisYPos),
+      Offset(chartArea.right, xAxisYPos),
+      xAxisPaint,
+    );
+  }
+
+  void _drawGrid(Canvas canvas, Rect chartArea) {
+    final paint = Paint()
+      ..color = style.gridColor.withValues(alpha: style.gridOpacity)
+      ..strokeWidth = style.gridStrokeWidth;
+
+    // Horizontal lines
+    if (style.autoHorizontalGridLines > 0) {
+      for (int i = 0; i < style.autoHorizontalGridLines; i++) {
+        final y = chartArea.top + (chartArea.height / style.autoHorizontalGridLines * i) + 1;
+        canvas.drawLine(
+          Offset(chartArea.left, y),
+          Offset(chartArea.right, y),
+          paint,
+        );
+      }
+    }
+
+    // Vertical lines - evenly spaced across the chart area using xSpanSlots if set
+    if (style.autoVerticalGridLines > 0) {
+      // Draw N lines, evenly spaced, skipping the very left and right edges
+      final n = style.autoVerticalGridLines;
+      if (n > 0) {
+        for (int i = 1; i <= n; i++) {
+          final x = chartArea.left + (i * chartArea.width) / (n + 1);
+          canvas.drawLine(
+            Offset(x, chartArea.top),
+            Offset(x, chartArea.bottom),
+            paint,
+          );
+        }
+      }
+    }
+  }
+
+  void _drawVerticalLines(Canvas canvas, Rect chartArea) {
+    if (series.isEmpty || series[0].dataPoints.isEmpty) return;
+
+    final dataPoints = series[0].dataPoints;
+    final indicesToDraw = <int>[];
+
+    // Add labeled positions when enabled in style, and also any data points
+    // that explicitly request a vertical line via `showVerticalLine`.
+    for (int i = 0; i < dataPoints.length; i++) {
+      final dp = dataPoints[i];
+      final labelPref = dp.labelDisplay;
+
+      final shouldFromLabelSetting = style.showVerticalLinesAtLabels && dp.label.isNotEmpty && labelPref != HybridChartLabelDisplay.forceHide;
+      final shouldForce = (labelPref == HybridChartLabelDisplay.forceDisplay) || (dp.showVerticalLine == true);
+
+      if (shouldFromLabelSetting || shouldForce) {
+        indicesToDraw.add(i);
+      }
+    }
+
+    if (indicesToDraw.isEmpty) return;
+
+    final paint = Paint()
+      ..color = style.gridColor.withValues(alpha: style.gridOpacity)
+      ..strokeWidth = style.gridStrokeWidth;
+
+    for (final index in indicesToDraw) {
+      if (index < 0 || index >= dataPoints.length) continue;
+
+      double x;
+      if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
+        final points = _getAreaChartPoints(chartArea, series[0]);
+        if (index >= points.length) continue;
+        x = points[index].dx;
+      } else {
+        final eff = _getEffectiveCandleWidth(chartArea, dataPoints.length);
+        x = _getCandleX(index, chartArea, dataPoints.length) + eff / 2;
+      }
+
+      canvas.drawLine(
+        Offset(x, chartArea.top),
+        Offset(x, chartArea.bottom),
+        paint,
+      );
+    }
+  }
+
+  /// Draws a dotted horizontal baseline at the height of the first data point value (area chart only)
+  void _drawBaseline(Canvas canvas, Rect chartArea) {
+    if (series.isEmpty || series[0].dataPoints.isEmpty || style.baseline == null) return;
+
+    final config = style.baseline!;
+    final firstValue = series[0].dataPoints.first.value;
+    final seriesColor = series[0].color ?? style.colors.first;
+    final baselineColor = config.color ?? seriesColor;
+
+    // Calculate Y position for the first value
+    final allValues = series.expand((s) => s.dataPoints.map((d) => d.value));
+    final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+    final maxValue = (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a > b ? a : b)) + maxOffset;
+    final minValue = style.forceYAxisFromZero ? 0.0 : (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a < b ? a : b));
+    final valueRange = maxValue - minValue;
+
+    if (valueRange == 0) return;
+
+    final normalizedValue = (firstValue - minValue) / valueRange;
+    final y = chartArea.bottom - (normalizedValue * chartArea.height);
+
+    // Create paint for the dotted line
+    final paint = Paint()
+      ..color = baselineColor
+      ..strokeWidth = config.strokeWidth
+      ..style = PaintingStyle.stroke;
+
+    // Draw dotted line across the chart
+    final path = Path();
+    double startX = chartArea.left;
+    final endX = chartArea.right;
+
+    // Create dashed pattern
+    final dashWidth = config.dashPattern[0];
+    final dashSpace = config.dashPattern.length > 1 ? config.dashPattern[1] : dashWidth;
+
+    while (startX < endX) {
+      path.moveTo(startX, y);
+      startX += dashWidth;
+      if (startX > endX) startX = endX;
+      path.lineTo(startX, y);
+      startX += dashSpace;
+    }
+
+    canvas.drawPath(path, paint);
+  }
+
+  void _drawYAxisLabels(Canvas canvas, Rect chartArea) {
+    final textStyle = style.labelStyle ?? const TextStyle(fontSize: 12, color: Colors.grey);
+
+    // If grid lines are set to 0, skip drawing Y axis labels (but do not break chart/tooltip/crosshair)
+    if (style.autoHorizontalGridLines == 0) {
+      return;
+    }
+
+    // Get value range based on chart type
+    double minValue, maxValue;
+
+    if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
+      final allValues = series.expand((s) => s.dataPoints.map((d) => d.value));
+      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+      maxValue = (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a > b ? a : b)) + maxOffset;
+      minValue = style.forceYAxisFromZero ? 0.0 : (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a < b ? a : b));
+    } else {
+      final allHighs = series[0].dataPoints.map((d) => d.high ?? d.close);
+      final allLows = series[0].dataPoints.map((d) => d.low ?? d.close);
+      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+      maxValue = (allHighs.isEmpty ? 0 : allHighs.reduce((a, b) => a > b ? a : b)) + maxOffset;
+      final lowest = allLows.isEmpty ? 0 : allLows.reduce((a, b) => a < b ? a : b);
+      minValue = style.forceYAxisFromZero ? 0.0 : lowest.toDouble();
+    }
+
+    final range = maxValue - minValue;
+
+    for (int i = 0; i <= style.autoHorizontalGridLines; i++) {
+      // Defensive: avoid division by zero
+      if (style.autoHorizontalGridLines == 0) break;
+      final value = minValue + (range * i / style.autoHorizontalGridLines);
+      final y = chartArea.bottom - (i / style.autoHorizontalGridLines * chartArea.height);
+
+      final label = axisConfig.priceFormatter?.call(value) ?? _formatNumber(value);
+      final textSpan = TextSpan(text: label, style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+
+      // Position based on yAxisPosition setting
+      final xPosition = axisConfig.yAxisPosition == YAxisPosition.right
+          ? chartArea.right + 8
+          : chartArea.left - textPainter.width - 8;
+
+      textPainter.paint(
+        canvas,
+        Offset(xPosition, y - textPainter.height / 2),
+      );
+    }
+  }
+
+  void _drawXAxisLabels(Canvas canvas, Rect chartArea) {
+    final textStyle = style.labelStyle ?? const TextStyle(fontSize: 12, color: Colors.grey);
+
+    if (series.isEmpty || series[0].dataPoints.isEmpty) return;
+
+    final dataPoints = series[0].dataPoints;
+    
+    // Determine max data points to show based on chart type and xSpanSlots
+    int maxDataPoints = dataPoints.length;
+    if (chartType == HybridChartType.candlestick) {
+      final slots = style.xSpanSlots ?? dataPoints.length;
+      maxDataPoints = min(dataPoints.length, slots);
+    }
+    
+    final labelCount = min(axisConfig.dateDivisions, maxDataPoints);
+    final step = max(1, (maxDataPoints / labelCount).ceil());
+
+    // Determine indices selected by stepping
+    final indicesToDraw = <int>[];
+    for (int i = 0; i < maxDataPoints; i += step) {
+      if (i >= maxDataPoints) break;
+      indicesToDraw.add(i);
+    }
+
+    // Also include any forced-display labels
+    for (int i = 0; i < maxDataPoints; i++) {
+      final dp = dataPoints[i];
+      if (dp.labelDisplay == HybridChartLabelDisplay.forceDisplay && !indicesToDraw.contains(i)) {
+        indicesToDraw.add(i);
+      }
+    }
+
+    // Paint labels for the collected indices (respecting forceHide)
+    for (final i in indicesToDraw) {
+      if (i < 0 || i >= maxDataPoints) continue;
+      final data = dataPoints[i];
+      if (data.labelDisplay == HybridChartLabelDisplay.forceHide) continue;
+
+      final label = data.label;
+      double x;
+      if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
+        final points = _getAreaChartPoints(chartArea, series[0]);
+        if (i >= points.length) continue;
+        x = points[i].dx;
+      } else {
+        final eff = _getEffectiveCandleWidth(chartArea, dataPoints.length);
+        x = _getCandleX(i, chartArea, dataPoints.length) + eff / 2;
+      }
+
+      final textSpan = TextSpan(text: label, style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+
+      final labelY = axisConfig.xAxisPosition == XAxisPosition.top
+        ? (chartArea.top - textPainter.height - 8)
+        : (chartArea.bottom + 8);
+      textPainter.paint(
+        canvas,
+        Offset(x - textPainter.width / 2, labelY),
+      );
+    }
+  }
+
+  void _drawAxisTitles(Canvas canvas, Rect chartArea) {
+    final textStyle = style.labelStyle ?? const TextStyle(fontSize: 12, color: Colors.grey);
+
+    // X Axis Title
+    if (style.xAxisTitle != null && style.xAxisTitle!.isNotEmpty) {
+      final titleStyle = style.xAxisTitleStyle ?? textStyle.copyWith(fontWeight: FontWeight.bold);
+      final span = TextSpan(text: style.xAxisTitle, style: titleStyle);
+      final tp = TextPainter(text: span, textDirection: ui.TextDirection.ltr)..layout();
+      final x = chartArea.left + chartArea.width / 2 - tp.width / 2;
+      final y = axisConfig.xAxisPosition == XAxisPosition.top
+          ? (chartArea.top - axisConfig.xAxisHeight + (axisConfig.xAxisHeight - tp.height) / 2)
+          : (chartArea.bottom + (axisConfig.xAxisHeight - tp.height) / 2);
+      tp.paint(canvas, Offset(x, y));
+    }
+
+    // Y Axis Title (rotated vertically)
+    if (style.yAxisTitle != null && style.yAxisTitle!.isNotEmpty) {
+      final titleStyle = style.yAxisTitleStyle ?? textStyle.copyWith(fontWeight: FontWeight.bold);
+      final span = TextSpan(text: style.yAxisTitle, style: titleStyle);
+      final tp = TextPainter(text: span, textDirection: ui.TextDirection.ltr)..layout();
+      // Position near the y-axis area depending on left/right setting
+      if (axisConfig.yAxisPosition == YAxisPosition.right) {
+        final x = chartArea.right + (axisConfig.yAxisWidth) / 2;
+        final y = chartArea.top + chartArea.height / 2;
+        canvas.save();
+        canvas.translate(x, y);
+        canvas.rotate(-pi / 2);
+        tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+        canvas.restore();
+      } else {
+        // Add a small extra gap when Y-axis is on the left so the title
+        // doesn't sit too close to the axis line (approx 3px).
+        const double extraGap = 3.0;
+        final x = chartArea.left - (axisConfig.yAxisWidth) / 2 - extraGap;
+        final y = chartArea.top + chartArea.height / 2;
+        canvas.save();
+        canvas.translate(x, y);
+        canvas.rotate(-pi / 2);
+        tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+        canvas.restore();
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(HybridChartPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.series != series ||
+        oldDelegate.style != style ||
+        oldDelegate.chartType != chartType ||
+        oldDelegate.hoverPosition != hoverPosition ||
+        oldDelegate.scrollOffset != scrollOffset;
+  }
+}
