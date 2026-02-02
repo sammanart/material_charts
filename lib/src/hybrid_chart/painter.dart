@@ -15,6 +15,7 @@ class HybridChartPainter extends CustomPainter {
   final Offset? hoverPosition;
   final HybridChartType chartType;
   final double scrollOffset;
+  final bool volumeBelowChart;
 
   HybridChartPainter({
     required this.series,
@@ -24,6 +25,7 @@ class HybridChartPainter extends CustomPainter {
     required this.chartType,
     this.hoverPosition,
     this.scrollOffset = 0.0,
+    this.volumeBelowChart = false,
   });
 
   @override
@@ -37,10 +39,29 @@ class HybridChartPainter extends CustomPainter {
       size.height - style.padding.vertical - axisConfig.xAxisHeight,
     );
 
-    canvas.save();
-    canvas.clipRect(chartArea);
+    // If volume bars are displayed below the main chart, split the
+    // available chartArea into a main plotting area and a volume area
+    // using `style.volumeBarHeightRatio` as the fraction reserved for
+    // the volume area at the bottom.
+    Rect mainArea = chartArea;
+    Rect volumeArea = chartArea;
+    if (style.showVolume && volumeBelowChart) {
+      final areaRatio = style.volumeAreaHeightRatio.clamp(0.0, 0.5);
+      final vOffset = style.volumeBarVerticalOffset;
+      // Base reserved height for volume area
+      double volH = chartArea.height * areaRatio;
+      // If caller requests a positive downward offset, give extra room
+      // to the volume area so bars can be pushed further down. Clamp
+      // volH so the main plotting area remains at least 1px high.
+      if (vOffset > 0) {
+        volH = (volH + vOffset).clamp(1.0, chartArea.height - 1.0);
+      }
+      final mainH = (chartArea.height - volH).clamp(0.0, chartArea.height);
+      mainArea = Rect.fromLTWH(chartArea.left, chartArea.top, chartArea.width, mainH);
+      volumeArea = Rect.fromLTWH(chartArea.left, chartArea.top + mainH, chartArea.width, volH);
+    }
 
-    // Draw chart area background
+    // Draw overall background for the full chart area (includes volume area)
     if (style.chartAreaBackgroundColor != Colors.transparent) {
       final bgPaint = Paint()
         ..color = style.chartAreaBackgroundColor
@@ -48,59 +69,68 @@ class HybridChartPainter extends CustomPainter {
       canvas.drawRect(chartArea, bgPaint);
     }
 
-    _drawAxes(canvas, chartArea);
-    if (style.showGrid) _drawGrid(canvas, chartArea);
-    _drawVerticalLines(canvas, chartArea);
+    // Draw main plotting area clipped so nothing from the hybrid chart
+    // appears below the volume bars when `volumeBelowChart` is enabled.
+    canvas.save();
+    canvas.clipRect(mainArea);
 
-    // Draw volume bars (beneath area/lines and candlesticks)
-    if (style.showVolume) {
-      _drawVolumeBars(canvas, chartArea);
-    }
+    // Axes, grid and vertical lines are specific to the main plotting area.
+    _drawAxes(canvas, mainArea);
+    if (style.showGrid) _drawGrid(canvas, mainArea);
+    _drawVerticalLines(canvas, mainArea);
 
-    // Draw based on chart type
+    // Draw main chart content
     if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
-      _drawAreaChart(canvas, chartArea, skipFill: chartType != HybridChartType.area, singleSeries: chartType == HybridChartType.line);
+      _drawAreaChart(canvas, mainArea, skipFill: chartType != HybridChartType.area, singleSeries: chartType == HybridChartType.line);
     } else {
-      _drawCandlestickChart(canvas, chartArea);
+      _drawCandlestickChart(canvas, mainArea);
     }
 
-    // Draw baseline if enabled
     if (style.baseline?.show == true && (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line)) {
-      _drawBaseline(canvas, chartArea);
+      _drawBaseline(canvas, mainArea);
     }
 
-    // Draw crosshair lines if enabled and a hover position is available
     if (style.crosshair?.enabled == true && hoverPosition != null) {
-      _drawCrosshairLines(canvas, chartArea);
+      _drawCrosshairLines(canvas, mainArea);
     } else if (hoverPosition != null) {
-      // Draw simple vertical line if crosshair is disabled
-      _drawVerticalLine(canvas, chartArea);
+      _drawVerticalLine(canvas, mainArea);
     }
 
     canvas.restore();
 
-    // Draw key event markers outside clipped area
+    // Draw key event markers and Y-axis labels relative to the main area
     if (style.showKeyEventMarkers) {
-      _drawKeyEventMarkers(canvas, chartArea);
+      _drawKeyEventMarkers(canvas, mainArea);
+    }
+    _drawYAxisLabels(canvas, mainArea);
+
+    // Draw volume bars in their own area beneath the main plot when requested
+    if (style.showVolume && volumeBelowChart) {
+      canvas.save();
+      canvas.clipRect(volumeArea);
+      _drawVolumeBars(canvas, volumeArea);
+      canvas.restore();
+    } else if (style.showVolume) {
+      // Legacy: draw volume inside the main plotting area
+      _drawVolumeBars(canvas, mainArea);
     }
 
-    // Draw axis labels outside clipped area
-    _drawYAxisLabels(canvas, chartArea);
-    _drawXAxisLabels(canvas, chartArea);
-    // Draw axis titles/legends if provided
-    _drawAxisTitles(canvas, chartArea);
+    // X-axis labels and titles should be tied to the main plotting area
+    // so they remain above the volume area when `volumeBelowChart` is true.
+    _drawXAxisLabels(canvas, mainArea);
+    _drawAxisTitles(canvas, mainArea);
 
     // Draw volume tooltip on top of chart elements (so it appears above crosshair lines)
     if (style.showVolume && style.showVolumeTooltip && hoverPosition != null) {
-      final volInfo = _getHoveredVolumeBarInfo(chartArea);
+      final volInfo = _getHoveredVolumeBarInfo(volumeBelowChart ? volumeArea : mainArea);
       if (volInfo != null) {
-        _drawVolumeTooltip(canvas, volInfo, chartArea);
+        _drawVolumeTooltip(canvas, volInfo, volumeBelowChart ? volumeArea : mainArea);
       }
     }
 
     // Draw crosshair labels last so they appear on top
     if (style.crosshair?.enabled == true && hoverPosition != null && style.crosshair!.showLabel) {
-      _drawCrosshairLabels(canvas, chartArea);
+      _drawCrosshairLabels(canvas, mainArea);
     }
   }
 
@@ -120,7 +150,15 @@ class HybridChartPainter extends CustomPainter {
 
     final availableWidth = chartArea.width;
     final slotWidth = availableWidth / (slots > 0 ? slots : 1);
-    final barMaxHeight = chartArea.height * style.volumeBarHeightRatio.clamp(0.0, 1.0);
+    // When `volumeBelowChart` is true the provided `chartArea` already
+    // represents the reserved volume area — use its full height. Otherwise
+    // treat `volumeBarHeightRatio` as the fraction of the provided area.
+    // Always apply `volumeBarHeightRatio` to control the maximum drawn
+    // bar height inside the provided area. This lets callers decide how
+    // tall bars are even when the volume area is reserved separately.
+    final ratio = style.volumeBarHeightRatio.isNaN ? 0.0 : style.volumeBarHeightRatio;
+    final barMaxHeight = chartArea.height * (ratio < 0.0 ? 0.0 : ratio);
+    final vOffset = volumeBelowChart ? style.volumeBarVerticalOffset : 0.0;
 
     final paint = Paint()
       ..color = style.volumeBarColor.withValues(alpha: style.volumeBarOpacity)
@@ -135,7 +173,10 @@ class HybridChartPainter extends CustomPainter {
       final barWidth = min(style.volumeBarWidth, slotWidth * 0.8);
 
       final height = (vol / maxVol) * barMaxHeight;
-      final top = chartArea.bottom - height;
+      // Apply vertical offset. Positive values move bars downward, negative
+      // values move them upward. Clamp so bars remain within the chartArea.
+      double top = (chartArea.bottom - height) + vOffset;
+      top = top.clamp(chartArea.top, chartArea.bottom - height);
 
       final rect = Rect.fromLTWH(xCenter - barWidth / 2, top, barWidth, height);
       canvas.drawRect(rect, paint);
@@ -157,7 +198,9 @@ class HybridChartPainter extends CustomPainter {
 
     final availableWidth = chartArea.width;
     final slotWidth = availableWidth / (slots > 0 ? slots : 1);
-    final barMaxHeight = chartArea.height * style.volumeBarHeightRatio.clamp(0.0, 1.0);
+    final ratio = style.volumeBarHeightRatio.isNaN ? 0.0 : style.volumeBarHeightRatio;
+    final barMaxHeight = chartArea.height * (ratio < 0.0 ? 0.0 : ratio);
+    final vOffset = volumeBelowChart ? style.volumeBarVerticalOffset : 0.0;
 
     for (int i = 0; i < count; i++) {
       final vol = volumes[i];
@@ -166,7 +209,8 @@ class HybridChartPainter extends CustomPainter {
       final xCenter = chartArea.left + (slotWidth * i) + slotWidth / 2;
       final barWidth = min(style.volumeBarWidth, slotWidth * 0.8);
       final height = (vol / maxVol) * barMaxHeight;
-      final top = chartArea.bottom - height;
+      double top = (chartArea.bottom - height) + vOffset;
+      top = top.clamp(chartArea.top, chartArea.bottom - height);
       final rect = Rect.fromLTWH(xCenter - barWidth / 2, top, barWidth, height);
       if (hoverPosition != null && rect.contains(hoverPosition!)) {
         return {'rect': rect, 'vol': vol, 'xCenter': xCenter, 'top': top, 'barWidth': barWidth};
@@ -382,7 +426,8 @@ class HybridChartPainter extends CustomPainter {
     final slots = style.xSpanSlots ?? dataPointCount;
     final availableWidth = chartArea.width;
     final candleSpacing = availableWidth / (slots > 0 ? slots : 1);
-    final effectiveWidth = min(style.candleWidth, candleSpacing * 0.8);
+    // Use style.spacing to reserve fraction of each slot as spacing between candles.
+    final effectiveWidth = min(style.candleWidth, candleSpacing * (1.0 - (style.spacing.clamp(0.0, 0.9))));
     final candleX = chartArea.left + (candleSpacing * index) + (candleSpacing - effectiveWidth) / 2;
     return candleX;
   }
@@ -557,7 +602,7 @@ class HybridChartPainter extends CustomPainter {
         final maxY = series
           .expand((s) => s.dataPoints.map((d) => d.value))
           .reduce((a, b) => a > b ? a : b) + maxOffset;
-      final normalizedY = (chartArea.bottom - hoverPosition!.dy) / chartArea.height;
+      final normalizedY = ((chartArea.bottom - hoverPosition!.dy) / chartArea.height).clamp(0.0, 1.0);
       yVal = minY + (normalizedY * (maxY - minY));
     } else if (chartType == HybridChartType.candlestick && series.isNotEmpty) {
       // For candlestick chart, use close price or estimate from height
@@ -570,19 +615,23 @@ class HybridChartPainter extends CustomPainter {
         final maxY = series
           .expand((s) => s.dataPoints.map((d) => d.high ?? d.close))
           .reduce((a, b) => a > b ? a : b) + maxOffset;
-      final normalizedY = (chartArea.bottom - hoverPosition!.dy) / chartArea.height;
+      final normalizedY = ((chartArea.bottom - hoverPosition!.dy) / chartArea.height).clamp(0.0, 1.0);
       yVal = minY + (normalizedY * (maxY - minY));
     }
       final yText = _formatNumber(yVal);
       final ySpan = TextSpan(text: yText, style: textStyle);
       final yPainter = TextPainter(text: ySpan, textDirection: TextDirection.ltr)..layout();
 
-        // Position: for horizontal single crosshair we force the label to the right
+        // Position: for horizontal single crosshair place label on the same
+        // side as the configured Y axis (left/right). Otherwise place next
+        // to the configured Y axis side as before.
         final yLabelX = (style.singleCrosshair == true && style.singleCrosshairOrientation == SingleCrosshairOrientation.horizontal)
-          ? chartArea.right + 8
+          ? (axisConfig.yAxisPosition == YAxisPosition.left
+            ? chartArea.left - yPainter.width - style.yAxisLabelGap - 4
+            : chartArea.right + style.yAxisLabelGap)
           : (axisConfig.yAxisPosition == YAxisPosition.right
-            ? chartArea.right + 8
-            : chartArea.left - yPainter.width - 8 - 4);
+            ? chartArea.right + style.yAxisLabelGap
+            : chartArea.left - yPainter.width - style.yAxisLabelGap - 4);
 
       final yRect = Rect.fromLTWH(
         yLabelX,
@@ -617,8 +666,8 @@ class HybridChartPainter extends CustomPainter {
         final xPainter = TextPainter(text: xSpan, textDirection: TextDirection.ltr)..layout();
 
         final xY = axisConfig.xAxisPosition == XAxisPosition.top
-          ? (chartArea.top - xPainter.height - 8)
-          : (chartArea.bottom + 8);
+          ? (chartArea.top - xPainter.height - style.xAxisLabelGap)
+          : (chartArea.bottom + style.xAxisLabelGap);
         final xRect = Rect.fromLTWH(
           (hoverPosition!.dx - xPainter.width / 2)
               .clamp(chartArea.left, chartArea.right - xPainter.width),
@@ -834,8 +883,8 @@ class HybridChartPainter extends CustomPainter {
 
       // Position based on yAxisPosition setting
       final xPosition = axisConfig.yAxisPosition == YAxisPosition.right
-          ? chartArea.right + 8
-          : chartArea.left - textPainter.width - 8;
+        ? chartArea.right + style.yAxisLabelGap
+        : chartArea.left - textPainter.width - style.yAxisLabelGap;
 
       textPainter.paint(
         canvas,
@@ -900,8 +949,8 @@ class HybridChartPainter extends CustomPainter {
       )..layout();
 
       final labelY = axisConfig.xAxisPosition == XAxisPosition.top
-        ? (chartArea.top - textPainter.height - 8)
-        : (chartArea.bottom + 8);
+        ? (chartArea.top - textPainter.height - style.xAxisLabelGap)
+        : (chartArea.bottom + style.xAxisLabelGap);
       textPainter.paint(
         canvas,
         Offset(x - textPainter.width / 2, labelY),
@@ -912,15 +961,15 @@ class HybridChartPainter extends CustomPainter {
   void _drawAxisTitles(Canvas canvas, Rect chartArea) {
     final textStyle = style.labelStyle ?? const TextStyle(fontSize: 12, color: Colors.grey);
 
-    // X Axis Title
+    // X Axis Title — position using style.xAxisTitleGap as distance from axis line
     if (style.xAxisTitle != null && style.xAxisTitle!.isNotEmpty) {
       final titleStyle = style.xAxisTitleStyle ?? textStyle.copyWith(fontWeight: FontWeight.bold);
       final span = TextSpan(text: style.xAxisTitle, style: titleStyle);
       final tp = TextPainter(text: span, textDirection: ui.TextDirection.ltr)..layout();
       final x = chartArea.left + chartArea.width / 2 - tp.width / 2;
       final y = axisConfig.xAxisPosition == XAxisPosition.top
-          ? (chartArea.top - axisConfig.xAxisHeight + (axisConfig.xAxisHeight - tp.height) / 2)
-          : (chartArea.bottom + (axisConfig.xAxisHeight - tp.height) / 2);
+          ? (chartArea.top - style.xAxisTitleGap - tp.height)
+          : (chartArea.bottom + style.xAxisTitleGap);
       tp.paint(canvas, Offset(x, y));
     }
 
@@ -931,7 +980,7 @@ class HybridChartPainter extends CustomPainter {
       final tp = TextPainter(text: span, textDirection: ui.TextDirection.ltr)..layout();
       // Position near the y-axis area depending on left/right setting
       if (axisConfig.yAxisPosition == YAxisPosition.right) {
-        final x = chartArea.right + (axisConfig.yAxisWidth) / 2;
+        final x = chartArea.right + style.yAxisTitleGap;
         final y = chartArea.top + chartArea.height / 2;
         canvas.save();
         canvas.translate(x, y);
@@ -939,10 +988,7 @@ class HybridChartPainter extends CustomPainter {
         tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
         canvas.restore();
       } else {
-        // Add a small extra gap when Y-axis is on the left so the title
-        // doesn't sit too close to the axis line (approx 3px).
-        const double extraGap = 3.0;
-        final x = chartArea.left - (axisConfig.yAxisWidth) / 2 - extraGap;
+        final x = chartArea.left - style.yAxisTitleGap;
         final y = chartArea.top + chartArea.height / 2;
         canvas.save();
         canvas.translate(x, y);

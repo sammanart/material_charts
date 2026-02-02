@@ -695,9 +695,69 @@ class CandlestickChartExample extends StatelessWidget {
   }
 }
 
-// Hybrid Chart Example 
-class HybridChartExample extends StatelessWidget {
+// Hybrid Chart Example
+class HybridChartExample extends StatefulWidget {
   const HybridChartExample({super.key});
+
+  @override
+  State<HybridChartExample> createState() => _HybridChartExampleState();
+}
+
+class _HybridChartExampleState extends State<HybridChartExample> {
+  HybridChartType _chartType = HybridChartType.area;
+  double _chartWidth = 800;
+  double _chartHeight = 400;
+  bool _showChartTypeToggle = true;
+
+  bool _showVolume = true;
+  bool _showVolumeBelow = true;
+  double _volumeBarHeightRatio = 0.5;
+  double _volumeAreaHeightRatio = 0.15;
+  double _volumeBarVerticalOffset = 20;
+  double _volumeBarWidth = 10;
+  double _volumeBarOpacity = 0.6;
+  bool _showVolumeTooltip = true;
+
+  bool _showGrid = false;
+  int _autoHorizontalGridLines = 3;
+  int _autoVerticalGridLines = 3;
+
+  double _candleWidth = 10.0;
+  double _wickWidth = 2.0;
+  double _pointSize = 4.0;
+  bool _forceYAxisFromZero = true;
+  bool _singleCrosshair = false;
+
+  bool _showVerticalLinesAtEveryLabels = false;
+  double _defaultLineWidth = 2.0;
+  bool _showPoints = false;
+  double _keyEventMarkerVerticalOffset = 18.0;
+  double _keyEventMarkerMinHoverRadius = 15.0;
+  double _keyEventMarkerSize = 10.0;
+  double _volumeTooltipBorderRadiusState = 6.0;
+  double _volumeTooltipOpacityState = 0.9;
+  bool _showKeyEventMarkersState = true;
+  double _animationDurationMs = 1500;
+
+  double _areaTopOpacity = 0.5;
+  double _areaBottomOpacity = 0.0;
+
+  int _xSpanSlots = 35;
+
+  EdgeInsets _padding = const EdgeInsets.fromLTRB(10, 10, 60, 10);
+  double _yAxisTitleGap = 10.0;
+  double _xAxisTitleGap = 25.0;
+  double _xAxisLabelGap = 8.0;
+  double _yAxisLabelGap = 8.0;
+  YAxisPosition _yAxisPosition = YAxisPosition.right;
+  XAxisPosition _xAxisPosition = XAxisPosition.top;
+  double _yAxisOpacity = 0.50;
+  double _xAxisOpacity = 0.50;
+  double _xAxisStrokeWidth = 3.00;
+  double _yAxisStrokeWidth = 3.00;
+  double _yAxisMaxOffset = 50.0;
+  double _gridStrokeWidth = 0.5;
+  double _gridOpacity = 1.0;
 
   @override
   Widget build(BuildContext context) {
@@ -768,21 +828,16 @@ class HybridChartExample extends StatelessWidget {
       HybridChartData(label: 'Jan 30', open: 156, high: 157, low: 126, close: 133, volume: 13300),
       HybridChartData(label: 'Jan 31', open: 133, high: 147, low: 125, close: 136, volume: 13600),
     ];
-
     final hybridSeries = [
       HybridChartSeries(
         name: 'AAPL',
         dataPoints: hybridData,
         color: Colors.green,
       ),
-      // HybridChartSeries(
-      //   name: 'MSFT',
-      //   dataPoints: hybridData2,
-      //   color: Colors.blue,
-      // ),
     ];
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
           'Hybrid Chart (Area + Candlestick + MultiLine)',
@@ -790,19 +845,19 @@ class HybridChartExample extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         SizedBox(
-          width: 800,
-          height: 400,
+          width: _chartWidth,
+          height: _chartHeight,
           child: MaterialHybridChart(
-            showChartTypeToggle: false,
+            showChartTypeToggle: _showChartTypeToggle,
             series: hybridSeries,
-            width: 800,
-            height: 400,
-            initialChartType: HybridChartType.area,
+            width: _chartWidth,
+            height: _chartHeight,
+            initialChartType: _chartType,
             axisConfig: HybridChartAxisConfig(
-              yAxisWidth: 10.0,
-              xAxisHeight: 25.0,
-              yAxisPosition: YAxisPosition.right,
-              xAxisPosition: XAxisPosition.bottom,
+              yAxisWidth: 0.0,
+              xAxisHeight: 0.0,
+              yAxisPosition: _yAxisPosition,
+              xAxisPosition: _xAxisPosition,
             ),
             style: HybridChartStyle.unified(
               xAxisTitle: 'Date',
@@ -810,66 +865,71 @@ class HybridChartExample extends StatelessWidget {
               xAxisTitleStyle: TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w600),
               yAxisTitleStyle: TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.w600),
               tooltipStyle: TooltipStyleConfig(borderWidth: 10),
-              padding: EdgeInsets.fromLTRB(10, 10, 60, 10),
+              padding: _padding,
               chartAreaBackgroundColor: Colors.white,
               keyEventMarkerConfig: KeyEventMarkerConfig(
-                verticalOffset: 18,
+                verticalOffset: _keyEventMarkerVerticalOffset,
                 defaultColor: Colors.red,
-                minHoverRadius: 15,
-                size: 10,
+                minHoverRadius: _keyEventMarkerMinHoverRadius,
+                size: _keyEventMarkerSize,
               ),
-              showVolumeTooltip: true,
-              showVolume: true,
+              showVolumeTooltip: _showVolumeTooltip,
+              showVolume: _showVolume,
               volumeTooltipBackgroundColor: Colors.black,
               volumeTooltipTextColor: Colors.white,
-              volumeTooltipOpacity: 0.6,
-              volumeTooltipBorderRadius: 6.0,
+              volumeTooltipOpacity: _volumeTooltipOpacityState,
+              volumeTooltipBorderRadius: _volumeTooltipBorderRadiusState,
               volumeBarColor: Colors.grey,
-              volumeBarOpacity: 0.6,
-              volumeBarWidth: 10.0,
-              volumeBarHeightRatio: 0.2,
-              showGrid: false,
-              showPoints: false,
-              candleWidth: 10.0,
-              wickWidth: 2.0,
-              defaultPointSize: 4.0,
-              forceYAxisFromZero: true,
+              volumeBarOpacity: _volumeBarOpacity,
+              volumeBarWidth: _volumeBarWidth,
+              volumeBarHeightRatio: _volumeBarHeightRatio,
+              volumeAreaHeightRatio: _volumeAreaHeightRatio,
+              showVolumeBelowChart: _showVolumeBelow,
+              volumeBarVerticalOffset: _volumeBarVerticalOffset,
+              showGrid: _showGrid,
+              showPoints: _showPoints,
+              defaultLineWidth: _defaultLineWidth,
+              spacing: 0.2,
+              verticalLineColor: Colors.purple,
+              verticalLineWidth: 0,
+              candleWidth: _candleWidth,
+              wickWidth: _wickWidth,
+              defaultPointSize: _pointSize,
+              forceYAxisFromZero: _forceYAxisFromZero,
               colors: [Colors.blue, Colors.green, Colors.red],
-              showKeyEventMarkers: true,
+              showKeyEventMarkers: _showKeyEventMarkersState,
               bullishColor: Colors.green,
               bearishColor: Colors.red,
-              areaFillOpacityTop: 0.5,
-              areaFillOpacityBottom: 0.0,
-              yAxisMaxOffset: 50,
-              xSpanSlots: 35,
+              areaFillOpacityTop: _areaTopOpacity,
+              areaFillOpacityBottom: _areaBottomOpacity,
+              yAxisMaxOffset: _yAxisMaxOffset,
+              xAxisTitleGap: _xAxisTitleGap,
+              yAxisTitleGap: _yAxisTitleGap,
+              xAxisLabelGap: _xAxisLabelGap,
+              yAxisLabelGap: _yAxisLabelGap,
+              xSpanSlots: _xSpanSlots,
               gridColor: Colors.grey,
-              gridStrokeWidth: 0.5,
-              gridOpacity: 1.00,
-              showVerticalLinesAtEveryLabels: false,
+              gridStrokeWidth: _gridStrokeWidth,
+              gridOpacity: _gridOpacity,
+              showVerticalLinesAtEveryLabels: _showVerticalLinesAtEveryLabels,
               yAxisColor: Colors.black,
               xAxisColor: Colors.black,
-              yAxisOpacity: 0.50,
-              xAxisOpacity: 0.50,
-              xAxisStrokeWidth: 3.00,
-              yAxisStrokeWidth: 3.00,
-              autoHorizontalGridLines: 3,
-              autoVerticalGridLines: 3,
-              animationDuration: Duration(seconds: 2),
-              singleCrosshair: false,
-              singleCrosshairOrientation: SingleCrosshairOrientation.horizontal,
+              yAxisOpacity: _yAxisOpacity,
+              xAxisOpacity: _xAxisOpacity,
+              xAxisStrokeWidth: _xAxisStrokeWidth,
+              yAxisStrokeWidth: _yAxisStrokeWidth,
+              autoHorizontalGridLines: _autoHorizontalGridLines,
+              autoVerticalGridLines: _autoVerticalGridLines,
+              animationDuration: Duration(milliseconds: _animationDurationMs.toInt()),
+              singleCrosshair: _singleCrosshair,
+              singleCrosshairOrientation: SingleCrosshairOrientation.vertical,
               crosshair: AreaCrosshairConfig(
                 lineColor: Colors.grey,
                 lineWidth: 1,
                 showLabel: true,
                 enabled: true,
-                labelStyle: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  backgroundColor: Colors.grey,
-                  color: Colors.white,
-                ),
               ),
               baseline: BaselineConfig(
-                //color: Colors.black, //falls back to the color of the line if no color is given here
                 show: true,
                 strokeWidth: 1.5,
                 dashPattern: [5.0, 3.0],
@@ -877,7 +937,190 @@ class HybridChartExample extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: 12),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 300),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(spacing: 16, runSpacing: 8, children: [
+                  const Text('For debugging: '),
+                  Row(children: [
+                    const Text('Show Volume'),
+                    Switch(value: _showVolume, onChanged: (v) => setState(() => _showVolume = v)),
+                  ]),
+                  Row(children: [
+                    const Text('Show Volume Below'),
+                    Switch(value: _showVolumeBelow, onChanged: (v) => setState(() => _showVolumeBelow = v)),
+                  ]),
+                  Row(children: [
+                    const Text('Force Y Axis From Zero'),
+                    Switch(value: _forceYAxisFromZero, onChanged: (v) => setState(() => _forceYAxisFromZero = v)),
+                  ]),
+                  Row(children: [
+                    const Text('Show Chart Type Toggle'),
+                    Switch(value: _showChartTypeToggle, onChanged: (v) => setState(() => _showChartTypeToggle = v)),
+                  ]),
+                  Row(children: [
+                    const Text('Show Volume Tooltip'),
+                    Switch(value: _showVolumeTooltip, onChanged: (v) => setState(() => _showVolumeTooltip = v)),
+                  ]),
+                  _buildSlider('Chart Width', _chartWidth, 300, 1200, (v) => setState(() => _chartWidth = v)),
+                  _buildSlider('Chart Height', _chartHeight, 200, 900, (v) => setState(() => _chartHeight = v)),
+                  Row(children: [
+                    const Text('Show Grid'),
+                    Switch(value: _showGrid, onChanged: (v) => setState(() => _showGrid = v)),
+                  ]),
+                  _buildSlider('Grid Stroke Width', _gridStrokeWidth, 0.0, 10.0, (v) => setState(() => _gridStrokeWidth = v)),
+                  _buildSlider('Grid Opacity', _gridOpacity, 0.0, 1.0, (v) => setState(() => _gridOpacity = v)),
+                  _buildSlider('Auto Horizontal Grid Lines', _autoHorizontalGridLines.toDouble(), 0, 20, (v) => setState(() => _autoHorizontalGridLines = v.toInt())),
+                  _buildSlider('Auto Vertical Grid Lines', _autoVerticalGridLines.toDouble(), 0, 20, (v) => setState(() => _autoVerticalGridLines = v.toInt())),
+                  Row(children: [
+                    const Text('Show Vertical Lines At Labels'),
+                    Switch(value: _showVerticalLinesAtEveryLabels, onChanged: (v) => setState(() => _showVerticalLinesAtEveryLabels = v)),
+                  ]),
+                  Row(children: [
+                    const Text('Single Crosshair'),
+                    Switch(value: _singleCrosshair, onChanged: (v) => setState(() => _singleCrosshair = v)),
+                  ]),
+                ]),
+                const SizedBox(height: 8),
+                _buildSlider('Candle Width', _candleWidth, 1, 80, (v) => setState(() => _candleWidth = v)),
+                _buildSlider('Wick Width', _wickWidth, 0.5, 10, (v) => setState(() => _wickWidth = v)),
+                _buildSlider('Volume Bar Height Ratio', _volumeBarHeightRatio, 0.0, 1.0, (v) => setState(() => _volumeBarHeightRatio = v)),
+                _buildSlider('Volume Area Height Ratio', _volumeAreaHeightRatio, 0.0, 0.5, (v) => setState(() => _volumeAreaHeightRatio = v)),
+                _buildSlider('Volume Vertical Offset', _volumeBarVerticalOffset, -50, 200, (v) => setState(() => _volumeBarVerticalOffset = v)),
+                _buildSlider('Volume Bar Width', _volumeBarWidth, 1, 80, (v) => setState(() => _volumeBarWidth = v)),
+                _buildSlider('Volume Opacity', _volumeBarOpacity, 0.0, 1.0, (v) => setState(() => _volumeBarOpacity = v)),
+                _buildSlider('Volume Tooltip Border Radius', _volumeTooltipBorderRadiusState, 0, 40, (v) => setState(() => _volumeTooltipBorderRadiusState = v)),
+                _buildSlider('Volume Tooltip Opacity', _volumeTooltipOpacityState, 0.0, 1.0, (v) => setState(() => _volumeTooltipOpacityState = v)),
+                Row(children: [
+                  const Text('Show Points'),
+                  Switch(value: _showPoints, onChanged: (v) => setState(() => _showPoints = v)),
+                ]),
+                _buildSlider('Point Size', _pointSize, 1, 12, (v) => setState(() => _pointSize = v)),
+                _buildSlider('Default Line Width', _defaultLineWidth, 0.0, 10.0, (v) => setState(() => _defaultLineWidth = v)),
+                _buildSlider('Area Top Opacity', _areaTopOpacity, 0.0, 1.0, (v) => setState(() => _areaTopOpacity = v)),
+                _buildSlider('Area Bottom Opacity', _areaBottomOpacity, 0.0, 1.0, (v) => setState(() => _areaBottomOpacity = v)),
+                Row(children: [
+                  const Text('Show Key Event Markers'),
+                  Switch(value: _showKeyEventMarkersState, onChanged: (v) => setState(() => _showKeyEventMarkersState = v)),
+                ]),
+                _buildSlider('Key Event Marker Vertical Offset', _keyEventMarkerVerticalOffset, -50, 200, (v) => setState(() => _keyEventMarkerVerticalOffset = v)),
+                _buildSlider('Key Event Marker Min Hover Radius', _keyEventMarkerMinHoverRadius, 0, 50, (v) => setState(() => _keyEventMarkerMinHoverRadius = v)),
+                _buildSlider('Key Event Marker Size', _keyEventMarkerSize, 2, 40, (v) => setState(() => _keyEventMarkerSize = v)),
+                _buildSlider('xSpanSlots', _xSpanSlots.toDouble(), 5, 120, (v) => setState(() => _xSpanSlots = v.toInt())),
+                const SizedBox(height: 8),
+                const Text('Padding (L, T, R, B):'),
+                _buildSlider('Padding Left', _padding.left, 0, 120, (v) => setState(() => _padding = EdgeInsets.fromLTRB(v, _padding.top, _padding.right, _padding.bottom))),
+                _buildSlider('Padding Top', _padding.top, 0, 120, (v) => setState(() => _padding = EdgeInsets.fromLTRB(_padding.left, v, _padding.right, _padding.bottom))),
+                _buildSlider('Padding Right', _padding.right, 0, 120, (v) => setState(() => _padding = EdgeInsets.fromLTRB(_padding.left, _padding.top, v, _padding.bottom))),
+                _buildSlider('Padding Bottom', _padding.bottom, 0, 120, (v) => setState(() => _padding = EdgeInsets.fromLTRB(_padding.left, _padding.top, _padding.right, v))),
+                const SizedBox(height: 8),
+                const Text('Axis & Grid Styling'),
+                Row(children: [
+                  const Text('Y Axis Position'),
+                  const SizedBox(width: 8),
+                  DropdownButton<YAxisPosition>(
+                    value: _yAxisPosition,
+                    items: YAxisPosition.values.map((p) => DropdownMenuItem(value: p, child: Text(p == YAxisPosition.left ? 'Left' : 'Right'))).toList(),
+                    onChanged: (v) => setState(() => _yAxisPosition = v ?? YAxisPosition.right),
+                  ),
+                  const SizedBox(width: 24),
+                  const Text('X Axis Position'),
+                  const SizedBox(width: 8),
+                  DropdownButton<XAxisPosition>(
+                    value: _xAxisPosition,
+                    items: XAxisPosition.values.map((p) => DropdownMenuItem(value: p, child: Text(p == XAxisPosition.top ? 'Top' : 'Bottom'))).toList(),
+                    onChanged: (v) => setState(() => _xAxisPosition = v ?? XAxisPosition.top),
+                  ),
+                ]),
+                _buildSlider('Y Axis Title Gap', _yAxisTitleGap, 0, 80, (v) => setState(() => _yAxisTitleGap = v)),
+                _buildSlider('X Axis Title Gap', _xAxisTitleGap, 0, 80, (v) => setState(() => _xAxisTitleGap = v)),
+                _buildSlider('Y Axis Label Gap', _yAxisLabelGap, 0, 80, (v) => setState(() => _yAxisLabelGap = v)),
+                _buildSlider('X Axis Label Gap', _xAxisLabelGap, 0, 80, (v) => setState(() => _xAxisLabelGap = v)),
+                _buildSlider('Y Axis Opacity', _yAxisOpacity, 0.0, 1.0, (v) => setState(() => _yAxisOpacity = v)),
+                _buildSlider('X Axis Opacity', _xAxisOpacity, 0.0, 1.0, (v) => setState(() => _xAxisOpacity = v)),
+                _buildSlider('X Axis Stroke Width', _xAxisStrokeWidth, 0.0, 10.0, (v) => setState(() => _xAxisStrokeWidth = v)),
+                _buildSlider('Y Axis Stroke Width', _yAxisStrokeWidth, 0.0, 10.0, (v) => setState(() => _yAxisStrokeWidth = v)),
+                _buildSlider('Y Axis Max Offset', _yAxisMaxOffset, 0, 200, (v) => setState(() => _yAxisMaxOffset = v)),
+                const SizedBox(height: 8),
+                _buildSlider('Animation Duration (ms)', _animationDurationMs, 0, 5000, (v) => setState(() => _animationDurationMs = v)),
+                const SizedBox(height: 12),
+                Row(children: [
+                  ElevatedButton(onPressed: _resetDefaults, child: const Text('Reset Defaults')),
+                  const SizedBox(width: 12),
+                  ElevatedButton(onPressed: () => setState(() {}), child: const Text('Refresh')),
+                ]),
+                const SizedBox(height: 40),
+              ],
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  Widget _buildSlider(String label, double value, double min, double max, ValueChanged<double> onChanged) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 6.0),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label), Text(value is double ? value.toStringAsFixed(2) : value.toString())]),
+        Slider(value: value.clamp(min, max), min: min, max: max, onChanged: onChanged),
+      ]),
+    );
+  }
+
+  void _resetDefaults() {
+    setState(() {
+      _chartType = HybridChartType.candlestick;
+      _chartWidth = 800;
+      _chartHeight = 400;
+      _showChartTypeToggle = false;
+      _showVolume = true;
+      _showVolumeBelow = true;
+      _volumeBarHeightRatio = 0.5;
+      _volumeAreaHeightRatio = 0.15;
+      _volumeBarVerticalOffset = 20;
+      _volumeBarWidth = 10;
+      _volumeBarOpacity = 0.6;
+      _showVolumeTooltip = true;
+      _showGrid = false;
+      _autoHorizontalGridLines = 3;
+      _autoVerticalGridLines = 3;
+      _candleWidth = 10.0;
+      _wickWidth = 2.0;
+      _pointSize = 4.0;
+      _forceYAxisFromZero = true;
+      _singleCrosshair = false;
+      _areaTopOpacity = 0.5;
+      _areaBottomOpacity = 0.0;
+      _xSpanSlots = 35;
+      _padding = const EdgeInsets.fromLTRB(10, 10, 60, 10);
+      _yAxisTitleGap = 10.0;
+      _xAxisTitleGap = 25.0;
+      _xAxisLabelGap = 8.0;
+      _yAxisLabelGap = 8.0;
+      _yAxisPosition = YAxisPosition.right;
+      _xAxisPosition = XAxisPosition.top;
+      _keyEventMarkerSize = 10.0;
+      _yAxisOpacity = 0.50;
+      _xAxisOpacity = 0.50;
+      _xAxisStrokeWidth = 3.00;
+      _yAxisStrokeWidth = 3.00;
+      _yAxisMaxOffset = 50.0;
+      _gridStrokeWidth = 0.5;
+      _gridOpacity = 1.0;
+      _showVerticalLinesAtEveryLabels = false;
+      _defaultLineWidth = 2.0;
+      _showPoints = false;
+      _keyEventMarkerVerticalOffset = 18.0;
+      _keyEventMarkerMinHoverRadius = 15.0;
+      _volumeTooltipBorderRadiusState = 6.0;
+      _volumeTooltipOpacityState = 0.9;
+      _showKeyEventMarkersState = true;
+      _animationDurationMs = 1500;
+    });
   }
 }

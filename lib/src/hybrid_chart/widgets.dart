@@ -22,6 +22,10 @@ class MaterialHybridChart extends StatefulWidget {
   final bool showGrid;
   final EdgeInsets padding;
   final bool showChartTypeToggle;
+  /// When true and `style.showVolume` is enabled, render the volume bars
+  /// in a separate area below the main plotting area instead of inside
+  /// the main chart area.
+  final bool showVolumeBelowChart;
 
   const MaterialHybridChart({
     super.key,
@@ -37,6 +41,7 @@ class MaterialHybridChart extends StatefulWidget {
     this.showGrid = true,
     this.padding = const EdgeInsets.all(16),
     this.showChartTypeToggle = false,
+    this.showVolumeBelowChart = false,
   });
 
   @override
@@ -81,11 +86,9 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
 
   void _scrollToEnd() {
     if (widget.series.isEmpty) return;
-    final totalCandleWidth = widget.style.candleWidth * (1 + widget.style.spacing);
-    _scrollOffset = max(
-      0.0,
-      totalCandleWidth * (widget.series[0].dataPoints.length - 1) - widget.width,
-    );
+    final slots = widget.style.xSpanSlots ?? widget.series[0].dataPoints.length;
+    final slotWidth = widget.width / (slots > 0 ? slots : 1);
+    _scrollOffset = max(0.0, slotWidth * (widget.series[0].dataPoints.length - 1) - widget.width);
   }
 
   void _switchChartType(HybridChartType type) {
@@ -122,10 +125,11 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
   void _handlePanUpdate(DragUpdateDetails details) {
     if (details.delta.dx.abs() < 1.0) return;
     setState(() {
-      final totalCandleWidth = widget.style.candleWidth * (1 + widget.style.spacing);
+      final slots = widget.style.xSpanSlots ?? widget.series[0].dataPoints.length;
+      final slotWidth = widget.width / (slots > 0 ? slots : 1);
       _scrollOffset = (_scrollOffset - details.delta.dx).clamp(
         0.0,
-        max(0.0, totalCandleWidth * widget.series[0].dataPoints.length - widget.width),
+        max(0.0, slotWidth * widget.series[0].dataPoints.length - widget.width),
       );
     });
   }
@@ -170,11 +174,11 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
 
         final hoverRadius = max(markerSize / 2, config.minHoverRadius);
         // Use rectangular hit area centered on the drawn marker but apply a
-        // fixed upward nudge so the trigger/tooltip sits above the marker.
+        // small upward nudge so the trigger/tooltip sits slightly above
+        // the marker for easier pointer access. Reduce the nudge so the
+        // trigger area and tooltip anchor remain visually close to markers.
         final dx = (pointerPosition.dx - markerOffset.dx).abs();
-        // pixels to move trigger/tooltip up for hit-testing only. Reduced
-        // values so the trigger area/tooltip anchor stay closer to markers.
-        final double triggerNudge = _currentChartType == HybridChartType.candlestick ? 10.0 : 10.0;
+        final double triggerNudge = 0.0; // no nudge
         final hitY = markerOffset.dy - triggerNudge;
         final dy = (pointerPosition.dy - hitY).abs();
         if (dx <= hoverRadius && dy <= hoverRadius) {
@@ -206,8 +210,10 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
           // Add a small tolerance so very thin bodies are still hoverable
           const double bodyTolerance = 3.0;
           // Shift the trigger area up specifically for candlestick bars.
-          // Reduced so the trigger isn't too far above the candle body.
-          const double barTriggerNudge = 10.0;
+          // When `forceYAxisFromZero` is enabled the visual scaling
+          // can make previous nudges feel too large; reduce the nudge
+          // in that case so hit-tests and tooltip anchors align better.
+          final double barTriggerNudge = 0.0; // remove upward nudge so trigger aligns with body
           final adjTop = topBody - barTriggerNudge;
           final adjBottom = bottomBody - barTriggerNudge;
           if (!(pointerPosition.dy >= adjTop - bodyTolerance && pointerPosition.dy <= adjBottom + bodyTolerance)) {
@@ -228,13 +234,10 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
           ''';
 
           final keyEvent = KeyEventData(htmlContent: html, markerColor: widget.style.bullishColor);
-          // Anchor tooltip above the candle using the same trigger nudge used elsewhere
-          final double triggerNudge = _currentChartType == HybridChartType.candlestick ? 10.0 : 10.0;
-          final markerY = _valueToYPixel(data.high ?? data.close, chartArea, seriesData);
-          // Use the actual marker position (already accounting for any
-          // configured verticalOffset) as the tooltip anchor. Keep the
-          // trigger nudge for hit-testing only.
-          final markerOffset = Offset(candleX + eff / 2, markerY);
+          // Anchor tooltip nearer the candle body center so it doesn't
+          // appear overly high when the hit-test uses an upward nudge.
+          final markerCenterY = (topBody + bottomBody) / 2;
+          final markerOffset = Offset(candleX + eff / 2, markerCenterY);
           return _TooltipHit(keyEvent, markerOffset);
         }
       }
@@ -438,10 +441,29 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
             actualHeight - widget.style.padding.vertical - widget.axisConfig.xAxisHeight,
           );
 
+          // When volume is shown below the main chart we must reserve
+          // a bottom area for volume bars. Compute the main plotting
+          // area here (same logic as the painter) and use the main
+          // area for hit-testing and tooltip anchoring so triggers
+          // remain aligned with visible markers/candles.
+          Rect mainArea = chartArea;
+          Rect volumeArea = chartArea;
+          if (widget.style.showVolume && widget.style.showVolumeBelowChart) {
+            final areaRatio = widget.style.volumeAreaHeightRatio.clamp(0.0, 0.5);
+            final vOffset = widget.style.volumeBarVerticalOffset;
+            double volH = chartArea.height * areaRatio;
+            if (vOffset > 0) {
+              volH = (volH + vOffset).clamp(1.0, chartArea.height - 1.0);
+            }
+            final mainH = (chartArea.height - volH).clamp(0.0, chartArea.height);
+            mainArea = Rect.fromLTWH(chartArea.left, chartArea.top, chartArea.width, mainH);
+            volumeArea = Rect.fromLTWH(chartArea.left, chartArea.top + mainH, chartArea.width, volH);
+          }
+
           // Recalculate tooltip position if active (handles resize automatically)
           if (_activeHtmlTooltip != null) {
             final pointerPos = _hoverPosition ?? Offset.zero;
-            final result = _computeActiveTooltip(chartArea, pointerPos);
+            final result = _computeActiveTooltip(mainArea, pointerPos);
             if (result.tooltip?.htmlContent == _activeHtmlTooltip!.htmlContent && result.position != _activeTooltipPosition) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (mounted && result.position != _activeTooltipPosition) {
@@ -521,7 +543,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
               onHover: (details) {
                 setState(() {
                   _hoverPosition = details.localPosition;
-                  _updateActiveTooltip(chartArea, details.localPosition);
+                  _updateActiveTooltip(mainArea, details.localPosition);
                 });
               },
               onExit: (_) => setState(() {
@@ -552,6 +574,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
                               chartType: _currentChartType,
                               hoverPosition: _hoverPosition,
                               scrollOffset: _scrollOffset,
+                              volumeBelowChart: widget.style.showVolumeBelowChart,
                             ),
                           );
                         },

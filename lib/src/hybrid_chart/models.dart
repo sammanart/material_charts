@@ -174,6 +174,14 @@ class HybridChartStyle {
   final TextStyle? xAxisTitleStyle;
   /// Optional text style for the Y axis title
   final TextStyle? yAxisTitleStyle;
+  /// Distance in pixels between the X axis line and the X axis title
+  final double xAxisTitleGap;
+  /// Distance in pixels between the Y axis line and the Y axis title
+  final double yAxisTitleGap;
+  /// Distance in pixels between the X axis line and the X axis labels
+  final double xAxisLabelGap;
+  /// Distance in pixels between the Y axis line and the Y axis labels
+  final double yAxisLabelGap;
 
   // Key events
   final bool showKeyEventMarkers;
@@ -221,7 +229,20 @@ class HybridChartStyle {
   /// Opacity for the volume tooltip background (0.0 - 1.0)
   final double volumeTooltipOpacity;
   /// Fraction of the chart height allocated to volume bars (0.0 - 1.0)
+  /// Multiplier applied to the chart area's height to determine the
+  /// maximum drawable height for volume bars. Values > 1.0 are allowed
+  /// and act as a multiplier (e.g. 2.0 makes the max bar height twice
+  /// the chart area's height). Negative values are treated as 0.
   final double volumeBarHeightRatio;
+  /// Fraction of the main chart area reserved for the volume area when
+  /// `showVolumeBelowChart` is true. Keep this <= 0.5 to avoid crowding.
+  final double volumeAreaHeightRatio;
+  /// When true and `showVolume` is enabled, render the volume bars in a
+  /// separate area below the main plotting area.
+  final bool showVolumeBelowChart;
+  /// Vertical offset (in pixels) applied to drawn volume bars. Positive
+  /// values move the bars downward; negative values move them upward.
+  final double volumeBarVerticalOffset;
   final TooltipStyleConfig? tooltipStyle;
   final BaselineConfig? baseline;
 
@@ -251,6 +272,10 @@ class HybridChartStyle {
     this.yAxisTitle,
     this.xAxisTitleStyle,
     this.yAxisTitleStyle,
+    this.xAxisTitleGap = 8.0,
+    this.yAxisTitleGap = 12.0,
+    this.xAxisLabelGap = 8.0,
+    this.yAxisLabelGap = 8.0,
     this.showKeyEventMarkers = true,
     this.keyEventMarkerConfig,
     this.crosshair,
@@ -283,6 +308,9 @@ class HybridChartStyle {
     this.volumeTooltipBorderRadius = 4.0,
     this.volumeTooltipOpacity = 0.9,
     this.volumeBarHeightRatio = 0.2,
+    this.volumeAreaHeightRatio = 0.2,
+    this.volumeBarVerticalOffset = 0.0,
+    this.showVolumeBelowChart = false,
     this.tooltipStyle,
     this.baseline,
   });
@@ -313,6 +341,10 @@ class HybridChartStyle {
     String? yAxisTitle,
     TextStyle? xAxisTitleStyle,
     TextStyle? yAxisTitleStyle,
+    double? xAxisTitleGap,
+    double? yAxisTitleGap,
+    double? xAxisLabelGap,
+    double? yAxisLabelGap,
     bool? showKeyEventMarkers,
     KeyEventMarkerConfig? keyEventMarkerConfig,
     AreaCrosshairConfig? crosshair,
@@ -343,6 +375,9 @@ class HybridChartStyle {
     double? volumeTooltipBorderRadius,
     double? volumeTooltipOpacity,
     double? volumeBarHeightRatio,
+    double? volumeAreaHeightRatio,
+    double? volumeBarVerticalOffset,
+    bool? showVolumeBelowChart,
     TooltipStyleConfig? tooltipStyle,
     BaselineConfig? baseline,
   }) {
@@ -372,6 +407,10 @@ class HybridChartStyle {
       yAxisTitle: yAxisTitle,
       xAxisTitleStyle: xAxisTitleStyle,
       yAxisTitleStyle: yAxisTitleStyle,
+      xAxisTitleGap: xAxisTitleGap ?? 8.0,
+      yAxisTitleGap: yAxisTitleGap ?? 12.0,
+      xAxisLabelGap: xAxisLabelGap ?? 8.0,
+      yAxisLabelGap: yAxisLabelGap ?? 8.0,
       showKeyEventMarkers: showKeyEventMarkers ?? true,
       keyEventMarkerConfig: keyEventMarkerConfig,
       crosshair: crosshair,
@@ -402,6 +441,9 @@ class HybridChartStyle {
       volumeTooltipBorderRadius: volumeTooltipBorderRadius ?? 4.0,
       volumeTooltipOpacity: volumeTooltipOpacity ?? 0.9,
       volumeBarHeightRatio: volumeBarHeightRatio ?? 0.2,
+      volumeAreaHeightRatio: volumeAreaHeightRatio ?? 0.2,
+      volumeBarVerticalOffset: volumeBarVerticalOffset ?? 0.0,
+      showVolumeBelowChart: showVolumeBelowChart ?? false,
       tooltipStyle: tooltipStyle,
       baseline: baseline,
     );
