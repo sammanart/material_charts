@@ -16,6 +16,8 @@ class HybridChartPainter extends CustomPainter {
   final HybridChartType chartType;
   final double scrollOffset;
   final bool volumeBelowChart;
+  final bool enableHoverPointScale;
+  final double hoverPointScale;
 
   HybridChartPainter({
     required this.series,
@@ -26,6 +28,8 @@ class HybridChartPainter extends CustomPainter {
     this.hoverPosition,
     this.scrollOffset = 0.0,
     this.volumeBelowChart = false,
+    this.enableHoverPointScale = false,
+    this.hoverPointScale = 1.5,
   });
 
   @override
@@ -283,7 +287,20 @@ class HybridChartPainter extends CustomPainter {
 
       // Draw points (only for those included in animatedPoints)
       if (style.showPoints) {
-        _drawAreaPoints(canvas, animatedPoints, color);
+        final pointSize = seriesData.pointSize ?? style.defaultPointSize;
+        int? hoverIndex;
+        if (enableHoverPointScale && hoverPosition != null) {
+          final hitRadius = max(8.0, pointSize / 2 + 6.0);
+          hoverIndex = _getHoveredPointIndex(animatedPoints, hoverPosition!, hitRadius);
+        }
+        _drawAreaPoints(
+          canvas,
+          animatedPoints,
+          color,
+          pointSize: pointSize,
+          hoverIndex: hoverIndex,
+          hoverScale: enableHoverPointScale ? hoverPointScale : 1.0,
+        );
       }
     }
   }
@@ -379,14 +396,39 @@ class HybridChartPainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
-  void _drawAreaPoints(Canvas canvas, List<Offset> points, Color color) {
+  void _drawAreaPoints(
+    Canvas canvas,
+    List<Offset> points,
+    Color color, {
+    required double pointSize,
+    int? hoverIndex,
+    double hoverScale = 1.0,
+  }) {
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
 
-    for (final point in points) {
-      canvas.drawCircle(point, style.defaultPointSize / 2, paint);
+    final safeScale = hoverScale <= 0 ? 1.0 : hoverScale;
+    final baseRadius = pointSize / 2;
+
+    for (int i = 0; i < points.length; i++) {
+      final point = points[i];
+      final isHovered = hoverIndex != null && hoverIndex == i;
+      final radius = isHovered ? baseRadius * safeScale : baseRadius;
+      canvas.drawCircle(point, radius, paint);
     }
+  }
+
+  int? _getHoveredPointIndex(List<Offset> points, Offset hover, double hitRadius) {
+    final hitRadiusSq = hitRadius * hitRadius;
+    for (int i = 0; i < points.length; i++) {
+      final dx = points[i].dx - hover.dx;
+      final dy = points[i].dy - hover.dy;
+      if ((dx * dx + dy * dy) <= hitRadiusSq) {
+        return i;
+      }
+    }
+    return null;
   }
 
   List<Offset> _getAreaChartPoints(Rect chartArea, HybridChartSeries seriesData) {

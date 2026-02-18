@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../area_chart/models.dart' show TooltipConfig, AreaCrosshairConfig, TooltipStyleConfig, BaselineConfig;
@@ -25,6 +27,9 @@ enum HybridChartType {
 
 /// Orientation for single crosshair when `singleCrosshair` is enabled
 enum SingleCrosshairOrientation { vertical, horizontal }
+
+/// Candlestick value types used when dragging or editing candlestick data.
+enum HybridCandlestickValueType { open, close, high, low }
 
 /// Per-data-point X-axis label display control.
 /// - `defaultDisplay`: follow the chart's existing rules for showing labels.
@@ -86,6 +91,52 @@ class HybridChartData {
   /// True when `open`, `high`, and `low` are all present and a candlestick
   /// can be rendered for this data point.
   bool get canShowCandlestick => open != null && high != null && low != null;
+
+  /// Returns a new data point with the requested candlestick value updated.
+  /// Related values are adjusted to keep the OHLC bounds consistent.
+  HybridChartData copyWithCandlestickValue(HybridCandlestickValueType valueType, double newValue) {
+    final currentOpen = open ?? close;
+    final currentClose = close;
+    final currentHigh = high ?? max(currentOpen, currentClose);
+    final currentLow = low ?? min(currentOpen, currentClose);
+
+    double nextOpen = currentOpen;
+    double nextClose = currentClose;
+    double nextHigh = currentHigh;
+    double nextLow = currentLow;
+
+    switch (valueType) {
+      case HybridCandlestickValueType.open:
+        nextOpen = newValue;
+        nextHigh = max(nextHigh, max(nextOpen, nextClose));
+        nextLow = min(nextLow, min(nextOpen, nextClose));
+        break;
+      case HybridCandlestickValueType.close:
+        nextClose = newValue;
+        nextHigh = max(nextHigh, max(nextOpen, nextClose));
+        nextLow = min(nextLow, min(nextOpen, nextClose));
+        break;
+      case HybridCandlestickValueType.high:
+        nextHigh = max(newValue, max(nextOpen, max(nextClose, nextLow)));
+        break;
+      case HybridCandlestickValueType.low:
+        nextLow = min(newValue, min(nextOpen, min(nextClose, nextHigh)));
+        break;
+    }
+
+    return HybridChartData(
+      label: label,
+      open: nextOpen,
+      high: nextHigh,
+      low: nextLow,
+      close: nextClose,
+      volume: volume,
+      keyEvent: keyEvent,
+      tooltipConfig: tooltipConfig,
+      showVerticalLine: showVerticalLine,
+      labelDisplay: labelDisplay,
+    );
+  }
 }
 
 /// Unified series that can represent either area or candlestick series

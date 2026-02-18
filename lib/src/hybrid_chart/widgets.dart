@@ -8,6 +8,9 @@ import '../shared/shared_models.dart';
 import 'models.dart';
 import 'painter.dart';
 
+typedef HybridChartPointValueChanged = void Function(int seriesIndex, int pointIndex, double newValue);
+typedef HybridChartCandlestickValueChanged = void Function(int seriesIndex, int pointIndex, HybridCandlestickValueType valueType, double newValue);
+
 /// Unified chart widget supporting both area and candlestick display modes
 class MaterialHybridChart extends StatefulWidget {
   final List<HybridChartSeries> series;
@@ -22,6 +25,15 @@ class MaterialHybridChart extends StatefulWidget {
   final bool showGrid;
   final EdgeInsets padding;
   final bool showChartTypeToggle;
+  final bool enablePointDrag;
+  final HybridChartPointValueChanged? onPointValueChange;
+  final HybridChartPointValueChanged? onPointValueChangeEnd;
+  final HybridChartCandlestickValueChanged? onCandlestickValueChange;
+  final HybridChartCandlestickValueChanged? onCandlestickValueChangeEnd;
+  final bool enableHoverPointScale;
+  final double hoverPointScale;
+  final bool showPointTooltipOnHover;
+  final bool showDragTooltip;
   /// When true and `style.showVolume` is enabled, render the volume bars
   /// in a separate area below the main plotting area instead of inside
   /// the main chart area.
@@ -41,6 +53,15 @@ class MaterialHybridChart extends StatefulWidget {
     this.showGrid = true,
     this.padding = const EdgeInsets.all(16),
     this.showChartTypeToggle = false,
+    this.enablePointDrag = false,
+    this.onPointValueChange,
+    this.onPointValueChangeEnd,
+    this.onCandlestickValueChange,
+    this.onCandlestickValueChangeEnd,
+    this.enableHoverPointScale = false,
+    this.hoverPointScale = 1.5,
+    this.showPointTooltipOnHover = false,
+    this.showDragTooltip = true,
     this.showVolumeBelowChart = false,
   });
 
@@ -58,6 +79,8 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
   Offset? _activeTooltipPosition;
   final GlobalKey _htmlTooltipKey = GlobalKey();
   Size? _activeTooltipSize;
+  _PointDrag? _activeDragPoint;
+  double? _lastDragValue;
 
   @override
   void initState() {
@@ -123,6 +146,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
   }
 
   void _handlePanUpdate(DragUpdateDetails details) {
+    if (_activeDragPoint != null) return;
     if (details.delta.dx.abs() < 1.0) return;
     setState(() {
       final slots = widget.style.xSpanSlots ?? widget.series[0].dataPoints.length;
@@ -135,7 +159,20 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
   }
 
   _TooltipHit _computeActiveTooltip(Rect chartArea, Offset pointerPosition) {
-    if (!widget.style.showKeyEventMarkers || widget.series.isEmpty) {
+    if (widget.series.isEmpty) {
+      return const _TooltipHit(null, null);
+    }
+
+    // Check for point hover tooltips in area/line modes first if enabled
+    if (widget.showPointTooltipOnHover && 
+        (_currentChartType == HybridChartType.area || 
+         _currentChartType == HybridChartType.multiLine || 
+         _currentChartType == HybridChartType.line)) {
+      final pointHit = _checkPointHover(chartArea, pointerPosition);
+      if (pointHit != null) return pointHit;
+    }
+
+    if (!widget.style.showKeyEventMarkers) {
       return const _TooltipHit(null, null);
     }
 
@@ -269,6 +306,31 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
     }
   }
 
+  double _yPixelToValue(double y, Rect chartArea, HybridChartSeries seriesData) {
+    double minValue;
+    double maxValue;
+
+    if (_currentChartType == HybridChartType.candlestick) {
+      final high = seriesData.dataPoints.map((d) => d.high ?? d.close).reduce(max);
+      final lowest = seriesData.dataPoints.map((d) => d.low ?? d.close).reduce(min);
+      minValue = widget.style.forceYAxisFromZero ? 0.0 : lowest;
+      final maxOffset = widget.style.yAxisMaxOffset < 0 ? 0.0 : widget.style.yAxisMaxOffset;
+      maxValue = high + maxOffset;
+    } else {
+      final allValues = widget.series.expand((s) => s.dataPoints.map((d) => d.value));
+      final maxOffset = widget.style.yAxisMaxOffset < 0 ? 0.0 : widget.style.yAxisMaxOffset;
+      maxValue = allValues.reduce((a, b) => a > b ? a : b) + maxOffset;
+      minValue = widget.style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
+    }
+
+    final valueRange = maxValue - minValue;
+    if (valueRange <= 0) return minValue;
+
+    final clampedY = y.clamp(chartArea.top, chartArea.bottom) as double;
+    final normalized = ((chartArea.bottom - clampedY) / chartArea.height).clamp(0.0, 1.0) as double;
+    return minValue + (normalized * valueRange);
+  }
+
   double _getCandleX(int index, Rect chartArea, int dataPointCount) {
     // Calculate width per candle using xSpanSlots if defined
     final slots = widget.style.xSpanSlots ?? dataPointCount;
@@ -316,12 +378,251 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
     return chartArea.left + (chartArea.width / denom) * index;
   }
 
+  bool _isPointDragEnabled() {
+    return widget.enablePointDrag;
+  }
+
+  _PointDrag? _hitTestPoint(Rect chartArea, Offset position) {
+    if (!_isPointDragEnabled()) return null;
+
+    for (int seriesIdx = 0; seriesIdx < widget.series.length; seriesIdx++) {
+      final seriesData = widget.series[seriesIdx];
+
+      if (_currentChartType == HybridChartType.candlestick) {
+        if (seriesData.dataPoints.isEmpty) continue;
+        final slots = widget.style.xSpanSlots ?? seriesData.dataPoints.length;
+        final count = min(seriesData.dataPoints.length, slots);
+        final eff = _getEffectiveCandleWidth(chartArea, seriesData.dataPoints.length);
+
+        for (int i = 0; i < count; i++) {
+          final candleX = _getCandleX(i, chartArea, seriesData.dataPoints.length);
+          if (position.dx < candleX || position.dx > candleX + eff) continue;
+
+          final data = seriesData.dataPoints[i];
+          final openY = _valueToYPixel(data.open ?? data.close, chartArea, seriesData);
+          final closeY = _valueToYPixel(data.close, chartArea, seriesData);
+          final highY = _valueToYPixel(data.high ?? data.close, chartArea, seriesData);
+          final lowY = _valueToYPixel(data.low ?? data.close, chartArea, seriesData);
+          final topBody = min(openY, closeY);
+          final bottomBody = max(openY, closeY);
+          const double bodyTolerance = 6.0;
+          final double lineTolerance = 6.0;
+          final bool hitBody = position.dy >= topBody - bodyTolerance && position.dy <= bottomBody + bodyTolerance;
+          final bool hitOpenLine = (position.dy - openY).abs() <= lineTolerance;
+          final bool hitCloseLine = (position.dy - closeY).abs() <= lineTolerance;
+          final bool hitHighLine = (position.dy - highY).abs() <= lineTolerance;
+          final bool hitLowLine = (position.dy - lowY).abs() <= lineTolerance;
+          if (hitHighLine) {
+            return _PointDrag(seriesIdx, i, HybridCandlestickValueType.high);
+          }
+          if (hitLowLine) {
+            return _PointDrag(seriesIdx, i, HybridCandlestickValueType.low);
+          }
+          if (hitOpenLine) {
+            return _PointDrag(seriesIdx, i, HybridCandlestickValueType.open);
+          }
+          if (hitCloseLine) {
+            return _PointDrag(seriesIdx, i, HybridCandlestickValueType.close);
+          }
+          if (hitBody) {
+            final target = (position.dy - openY).abs() <= (position.dy - closeY).abs()
+                ? HybridCandlestickValueType.open
+                : HybridCandlestickValueType.close;
+            return _PointDrag(seriesIdx, i, target);
+          }
+        }
+
+        continue;
+      }
+
+      final points = _getAreaChartPoints(chartArea, seriesData);
+      if (points.isEmpty) continue;
+
+      final pointSize = seriesData.pointSize ?? widget.style.defaultPointSize;
+      final hitRadius = max(8.0, pointSize + 6.0);
+
+      for (int i = 0; i < points.length; i++) {
+        final p = points[i];
+        final dx = (position.dx - p.dx).abs();
+        final dy = (position.dy - p.dy).abs();
+        if (dx <= hitRadius && dy <= hitRadius) {
+          return _PointDrag(seriesIdx, i, null);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  bool _tryStartPointDrag(Rect chartArea, Offset position) {
+    final hit = _hitTestPoint(chartArea, position);
+    if (hit == null) return false;
+
+    setState(() {
+      _activeDragPoint = hit;
+      _lastDragValue = null;
+      _hoverPosition = position;
+      _activeHtmlTooltip = null;
+      _activeTooltipPosition = null;
+    });
+
+    _updateDraggedPoint(chartArea, position);
+    return true;
+  }
+
+  void _updateDraggedPoint(Rect chartArea, Offset position) {
+    final active = _activeDragPoint;
+    if (active == null) return;
+
+    final seriesData = widget.series[active.seriesIndex];
+    final newValue = _yPixelToValue(position.dy, chartArea, seriesData);
+    _lastDragValue = newValue;
+
+    if (widget.showDragTooltip) {
+      _showDragTooltip(chartArea, seriesData, active, newValue);
+    }
+
+    if (active.valueType != null) {
+      if (widget.onCandlestickValueChange != null) {
+        widget.onCandlestickValueChange!(active.seriesIndex, active.pointIndex, active.valueType!, newValue);
+      } else {
+        widget.onPointValueChange?.call(active.seriesIndex, active.pointIndex, newValue);
+      }
+    } else {
+      widget.onPointValueChange?.call(active.seriesIndex, active.pointIndex, newValue);
+    }
+
+    setState(() {
+      _hoverPosition = position;
+    });
+  }
+
+  void _endPointDrag() {
+    final active = _activeDragPoint;
+    if (active == null) return;
+
+    final lastValue = _lastDragValue;
+    setState(() {
+      _activeDragPoint = null;
+      _lastDragValue = null;
+      if (widget.showDragTooltip) {
+        _activeHtmlTooltip = null;
+        _activeTooltipPosition = null;
+      }
+    });
+
+    if (lastValue != null) {
+      if (active.valueType != null) {
+        if (widget.onCandlestickValueChangeEnd != null) {
+          widget.onCandlestickValueChangeEnd!(active.seriesIndex, active.pointIndex, active.valueType!, lastValue);
+        } else {
+          widget.onPointValueChangeEnd?.call(active.seriesIndex, active.pointIndex, lastValue);
+        }
+      } else {
+        widget.onPointValueChangeEnd?.call(active.seriesIndex, active.pointIndex, lastValue);
+      }
+    }
+  }
+
+  void _showDragTooltip(Rect chartArea, HybridChartSeries seriesData, _PointDrag active, double newValue) {
+    String label = seriesData.dataPoints[active.pointIndex].label;
+    if (label.trim().isEmpty) {
+      label = DateFormat('MMM dd, yyyy').format(DateTime.now());
+    }
+
+    String valueLabel = 'Value';
+    if (active.valueType != null) {
+      switch (active.valueType!) {
+        case HybridCandlestickValueType.open:
+          valueLabel = 'Open';
+          break;
+        case HybridCandlestickValueType.close:
+          valueLabel = 'Close';
+          break;
+        case HybridCandlestickValueType.high:
+          valueLabel = 'High';
+          break;
+        case HybridCandlestickValueType.low:
+          valueLabel = 'Low';
+          break;
+      }
+    }
+
+    final html = '''
+      <div style="font-family: Arial, sans-serif; padding:6px;">
+        <div style="font-weight:bold;margin-bottom:6px;">$label</div>
+        <div>$valueLabel: ${newValue.toStringAsFixed(2)}</div>
+      </div>
+    ''';
+
+    final tooltip = KeyEventData(
+      htmlContent: html,
+      markerColor: seriesData.color ?? widget.style.bullishColor,
+    );
+
+    double x;
+    double y;
+    if (_currentChartType == HybridChartType.candlestick) {
+      final eff = _getEffectiveCandleWidth(chartArea, seriesData.dataPoints.length);
+      x = _getCandleX(active.pointIndex, chartArea, seriesData.dataPoints.length) + eff / 2;
+      y = _valueToYPixel(newValue, chartArea, seriesData);
+    } else {
+      x = _getXCoordinate(chartArea, active.pointIndex, seriesData.dataPoints.length);
+      y = _valueToYPixel(newValue, chartArea, seriesData);
+    }
+
+    setState(() {
+      _activeHtmlTooltip = tooltip;
+      _activeTooltipPosition = Offset(x, y);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measureHtmlTooltip());
+  }
+
   void _updateActiveTooltip(Rect chartArea, Offset pointerPosition) {
     final result = _computeActiveTooltip(chartArea, pointerPosition);
     _activeHtmlTooltip = result.tooltip;
     _activeTooltipPosition = result.position;
     // Measure tooltip size after it's built so we can position it accurately
     WidgetsBinding.instance.addPostFrameCallback((_) => _measureHtmlTooltip());
+  }
+
+  _TooltipHit? _checkPointHover(Rect chartArea, Offset pointerPosition) {
+    for (int seriesIdx = 0; seriesIdx < widget.series.length; seriesIdx++) {
+      final seriesData = widget.series[seriesIdx];
+      final points = _getAreaChartPoints(chartArea, seriesData);
+      if (points.isEmpty) continue;
+
+      final pointSize = seriesData.pointSize ?? widget.style.defaultPointSize;
+      final hitRadius = max(8.0, pointSize + 6.0);
+
+      for (int i = 0; i < points.length; i++) {
+        final p = points[i];
+        final dx = (pointerPosition.dx - p.dx).abs();
+        final dy = (pointerPosition.dy - p.dy).abs();
+        if (dx <= hitRadius && dy <= hitRadius) {
+          final data = seriesData.dataPoints[i];
+          String label = data.label;
+          if (label.trim().isEmpty) {
+            label = DateFormat('MMM dd, yyyy').format(DateTime.now());
+          }
+
+          final html = '''
+            <div style="font-family: Arial, sans-serif; padding:6px;">
+              <div style="font-weight:bold;margin-bottom:6px;">$label</div>
+              <div>Value: ${data.value.toStringAsFixed(2)}</div>
+            </div>
+          ''';
+
+          final tooltip = KeyEventData(
+            htmlContent: html,
+            markerColor: seriesData.color ?? widget.style.colors[seriesIdx % widget.style.colors.length],
+          );
+
+          return _TooltipHit(tooltip, p);
+        }
+      }
+    }
+    return null;
   }
 
   void _measureHtmlTooltip() {
@@ -537,10 +838,25 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
         Expanded(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onPanUpdate: _handlePanUpdate,
+            onPanStart: (details) {
+              _tryStartPointDrag(mainArea, details.localPosition);
+            },
+            onPanUpdate: (details) {
+              if (_activeDragPoint != null) {
+                _updateDraggedPoint(mainArea, details.localPosition);
+                return;
+              }
+              _handlePanUpdate(details);
+            },
+            onPanEnd: (_) => _endPointDrag(),
+            onPanCancel: _endPointDrag,
             child: MouseRegion(
               onEnter: (_) => setState(() => _hoverPosition = null),
               onHover: (details) {
+                if (_activeDragPoint != null) {
+                  setState(() => _hoverPosition = details.localPosition);
+                  return;
+                }
                 setState(() {
                   _hoverPosition = details.localPosition;
                   _updateActiveTooltip(mainArea, details.localPosition);
@@ -575,6 +891,8 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
                               hoverPosition: _hoverPosition,
                               scrollOffset: _scrollOffset,
                               volumeBelowChart: widget.style.showVolumeBelowChart,
+                              enableHoverPointScale: widget.enableHoverPointScale,
+                              hoverPointScale: widget.hoverPointScale,
                             ),
                           );
                         },
@@ -607,4 +925,11 @@ class _TooltipHit {
   final KeyEventData? tooltip;
   final Offset? position;
   const _TooltipHit(this.tooltip, this.position);
+}
+
+class _PointDrag {
+  final int seriesIndex;
+  final int pointIndex;
+  final HybridCandlestickValueType? valueType;
+  const _PointDrag(this.seriesIndex, this.pointIndex, this.valueType);
 }

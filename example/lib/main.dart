@@ -1,8 +1,366 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:material_charts/material_charts.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
 
 void main() {
   runApp(const MyApp());
+}
+
+Future<Uint8List> _capturePng(GlobalKey repaintKey, {double pixelRatio = 3.0}) async {
+  final boundary = repaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+  if (boundary == null) {
+    throw StateError('RepaintBoundary not found');
+  }
+  final image = await boundary.toImage(pixelRatio: 100);
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+  if (bytes == null) {
+    throw StateError('Failed to encode PNG');
+  }
+  return bytes.buffer.asUint8List();
+}
+
+Future<void> _exportChartToPdf(BuildContext context, GlobalKey repaintKey, String title) async {
+  try {
+    final pngBytes = await _capturePng(repaintKey);
+    final doc = pw.Document();
+    final image = pw.MemoryImage(pngBytes);
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context ctx) {
+          return pw.Center(
+            child: pw.Column(
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                //pw.Text(title, style: pw.TextStyle(fontSize: 18)),
+                pw.SizedBox(height: 12),
+                pw.Image(image, fit: pw.BoxFit.contain),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (_) async => doc.save());
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('PDF export failed: $e')),
+      );
+    }
+  }
+}
+
+Widget _buildExportHeader(BuildContext context, String title, GlobalKey repaintKey, {VoidCallback? onExportSvg}) {
+  return Row(
+    children: [
+      Expanded(
+        child: Text(
+          title,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+      ),
+      if (onExportSvg != null)
+        IconButton(
+          tooltip: 'Export SVG',
+          icon: const Icon(Icons.image),
+          onPressed: onExportSvg,
+        ),
+      IconButton(
+        tooltip: 'Export PDF',
+        icon: const Icon(Icons.picture_as_pdf),
+        onPressed: () => _exportChartToPdf(context, repaintKey, title),
+      ),
+    ],
+  );
+}
+
+Future<File> _saveSvgToDocuments(String svg, {String? fileName}) async {
+  final dir = await getApplicationDocumentsDirectory();
+  final timestamp = DateTime.now().millisecondsSinceEpoch;
+  final safeName = fileName ?? 'chart_$timestamp.svg';
+  final file = File('${dir.path}/$safeName');
+  await file.writeAsString(svg);
+  return file;
+}
+
+// Generic export functions for different chart types
+
+Future<void> _exportBarChartSvg(
+  BuildContext context,
+  List<BarChartData> data,
+  BarChartStyle style,
+  String title,
+) async {
+  try {
+    final svg = BarChartSvgExporter.exportSvg(
+      data: data,
+      style: style,
+      width: 350,
+      height: 300,
+      padding: const EdgeInsets.all(24),
+      options: BarChartSvgOptions(
+        includeGrid: true,
+        includeValues: true,
+        includeLabels: true,
+        title: title,
+      ),
+    );
+
+    final file = await _saveSvgToDocuments(svg, fileName: 'bar_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    if (!context.mounted) return;
+
+    await _showSvgPreviewDialog(context, svg, file);
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('SVG export failed: $e')),
+    );
+  }
+}
+
+Future<void> _exportPieChartSvg(
+  BuildContext context,
+  List<PieChartData> data,
+  PieChartStyle style,
+  String title,
+) async {
+  try {
+    final svg = PieChartSvgExporter.exportSvg(
+      data: data,
+      style: style,
+      width: 500,
+      height: 450,
+      padding: const EdgeInsets.all(40),
+      chartRadius: 120,
+      options: PieChartSvgOptions(
+        showLabels: true,
+        showValues: true,
+        showLegend: true,
+        showConnectorLines: true,
+        title: title,
+      ),
+    );
+
+    final file = await _saveSvgToDocuments(svg, fileName: 'pie_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    if (!context.mounted) return;
+
+    await _showSvgPreviewDialog(context, svg, file);
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('SVG export failed: $e')),
+    );
+  }
+}
+
+Future<void> _exportLineChartSvg(
+  BuildContext context,
+  List<ChartData> data,
+  LineChartStyle style,
+  String title,
+) async {
+  try {
+    final svg = LineChartSvgExporter.exportSvg(
+      data: data,
+      style: style,
+      width: 350,
+      height: 250,
+      padding: const EdgeInsets.all(24),
+      options: LineChartSvgOptions(
+        includeGrid: true,
+        showPoints: true,
+        includeLabels: true,
+        title: title,
+      ),
+    );
+
+    final file = await _saveSvgToDocuments(svg, fileName: 'line_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    if (!context.mounted) return;
+
+    await _showSvgPreviewDialog(context, svg, file);
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('SVG export failed: $e')),
+    );
+  }
+}
+
+Future<void> _exportAreaChartSvg(
+  BuildContext context,
+  List<AreaChartSeries> series,
+  AreaChartStyle style,
+  String title,
+) async {
+  try {
+    final svg = AreaChartSvgExporter.exportSvg(
+      series: series,
+      style: style,
+      width: 350,
+      height: 250,
+      padding: const EdgeInsets.all(24),
+      options: AreaChartSvgOptions(
+        includeGrid: true,
+        showPoints: true,
+        showKeyEventMarkers: true,
+        title: title,
+      ),
+    );
+
+    final file = await _saveSvgToDocuments(svg, fileName: 'area_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    if (!context.mounted) return;
+
+    await _showSvgPreviewDialog(context, svg, file);
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('SVG export failed: $e')),
+    );
+  }
+}
+
+Future<void> _exportMultiLineChartSvg(
+  BuildContext context,
+  List<ChartSeries> series,
+  MultiLineChartStyle style,
+  String title,
+) async {
+  try {
+    final svg = MultiLineChartSvgExporter.exportSvg(
+      series: series,
+      style: style,
+      width: 800,
+      height: 400,
+      padding: const EdgeInsets.all(48),
+      options: MultiLineChartSvgOptions(
+        includeGrid: true,
+        showPoints: true,
+        showLegend: true,
+        title: title,
+      ),
+    );
+
+    final file = await _saveSvgToDocuments(svg, fileName: 'multi_line_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    if (!context.mounted) return;
+
+    await _showSvgPreviewDialog(context, svg, file);
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('SVG export failed: $e')),
+    );
+  }
+}
+
+Future<void> _exportStackedBarChartSvg(
+  BuildContext context,
+  List<StackedBarData> data,
+  StackedBarChartStyle style,
+  String title,
+) async {
+  try {
+    final svg = StackedBarChartSvgExporter.exportSvg(
+      data: data,
+      style: style,
+      width: 800,
+      height: 400,
+      padding: const EdgeInsets.all(48),
+      options: StackedBarChartSvgOptions(
+        includeGrid: true,
+        showValues: true,
+        includeLabels: true,
+        includeYAxis: true,
+        title: title,
+      ),
+    );
+
+    final file = await _saveSvgToDocuments(svg, fileName: 'stacked_bar_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    if (!context.mounted) return;
+
+    await _showSvgPreviewDialog(context, svg, file);
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('SVG export failed: $e')),
+    );
+  }
+}
+
+Future<void> _showSvgPreviewDialog(BuildContext context, String svg, File file) async {
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) {
+      return AlertDialog(
+        title: const Text('SVG Preview'),
+        content: SizedBox(
+          width: 600,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 400),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(child: _TransparencyCheckerboard()),
+                      Positioned.fill(child: SvgPicture.string(svg, fit: BoxFit.contain)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    file.path,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: svg));
+              if (dialogContext.mounted) {
+                Navigator.of(dialogContext).pop();
+              }
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('SVG copied to clipboard.')),
+                );
+              }
+            },
+            child: const Text('Copy SVG'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await Share.shareXFiles([XFile(file.path)], text: 'Hybrid chart SVG');
+            },
+            child: const Text('Share'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      );
+    },
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -33,9 +391,9 @@ class _ChartsDemoState extends State<ChartsDemo> {
 
   final List<Widget> _charts = [
     const LineChartExample(),
-    const BarChartExample(),
-    const PieChartExample(),
-    const AreaChartExample(),
+    BarChartExample(),
+    PieChartExample(),
+    AreaChartExample(),
     const TreemapChartExample(),
     const MultiLineChartExample(),
     const StackedBarChartExample(),
@@ -103,22 +461,35 @@ class LineChartExample extends StatelessWidget {
       const ChartData(value: 35, label: 'Jun'),
     ];
 
+    const style = LineChartStyle(
+      lineColor: Colors.blue,
+      pointColor: Colors.red,
+      useCurvedLines: true,
+    );
+
     return Column(
       children: [
-        const Text(
-          'Monthly Sales Data',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Monthly Sales Data',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Export SVG',
+              icon: const Icon(Icons.image),
+              onPressed: () => _exportLineChartSvg(context, data, style, 'Monthly Sales Data'),
+            ),
+          ],
         ),
         const SizedBox(height: 20),
         MaterialChartLine(
           data: data,
           width: 350,
           height: 250,
-          style: const LineChartStyle(
-            lineColor: Colors.blue,
-            pointColor: Colors.red,
-            useCurvedLines: true,
-          ),
+          style: style,
         ),
       ],
     );
@@ -127,7 +498,9 @@ class LineChartExample extends StatelessWidget {
 
 // Bar Chart Example
 class BarChartExample extends StatelessWidget {
-  const BarChartExample({super.key});
+  BarChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -139,23 +512,31 @@ class BarChartExample extends StatelessWidget {
       const BarChartData(value: 30, label: 'Product E'),
     ];
 
+    const style = BarChartStyle(
+      barColor: Colors.green,
+      gradientEffect: true,
+      gradientColors: [Colors.green, Colors.lightGreen],
+    );
+
     return Column(
       children: [
-        const Text(
-          'Product Sales Comparison',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        _buildExportHeader(
+          context, 
+          'Product Sales Comparison', 
+          _chartKey,
+          onExportSvg: () => _exportBarChartSvg(context, data, style, 'Product Sales Comparison'),
         ),
         const SizedBox(height: 20),
-        MaterialBarChart(
-          data: data,
-          width: 350,
-          height: 300,
-          style: const BarChartStyle(
-            barColor: Colors.green,
-            gradientEffect: true,
-            gradientColors: [Colors.green, Colors.lightGreen],
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialBarChart(
+            data: data,
+            width: 350,
+            height: 300,
+            style: style,
           ),
         ),
+      
       ],
     );
   }
@@ -163,7 +544,9 @@ class BarChartExample extends StatelessWidget {
 
 // Pie Chart Example
 class PieChartExample extends StatelessWidget {
-  const PieChartExample({super.key});
+  PieChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -175,20 +558,27 @@ class PieChartExample extends StatelessWidget {
       const PieChartData(value: 10, label: 'Other', color: Colors.purple),
     ];
 
+    const style = PieChartStyle(
+      showLegend: true,
+      legendPosition: PieChartLegendPosition.bottom,
+    );
+
     return Column(
       children: [
-        const Text(
-          'Device Usage Distribution',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        _buildExportHeader(
+          context, 
+          'Device Usage Distribution', 
+          _chartKey,
+          onExportSvg: () => _exportPieChartSvg(context, data, style, 'Device Usage Distribution'),
         ),
         const SizedBox(height: 20),
-        MaterialPieChart(
-          data: data,
-          width: 350,
-          height: 300,
-          style: const PieChartStyle(
-            showLegend: true,
-            legendPosition: PieChartLegendPosition.bottom,
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialPieChart(
+            data: data,
+            width: 350,
+            height: 300,
+            style: style,
           ),
         ),
       ],
@@ -198,7 +588,9 @@ class PieChartExample extends StatelessWidget {
 
 // Area Chart Example
 class AreaChartExample extends StatelessWidget {
-  const AreaChartExample({super.key});
+  AreaChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -297,46 +689,52 @@ class AreaChartExample extends StatelessWidget {
       ),
     ];
 
+    const style = AreaChartStyle(
+      forceYAxisFromZero: true,
+      keyEventMarkerConfig: KeyEventMarkerConfig(
+        verticalOffset: 18,
+      ),
+      crosshair: AreaCrosshairConfig(
+        enabled: true,
+        labelStyle: TextStyle(
+          fontWeight: FontWeight.bold,
+          backgroundColor: Colors.grey,
+          color: Colors.white,
+        )),
+      showKeyEventMarkers: true,
+      tooltipStyle: TooltipStyleConfig(
+        backgroundColor: Colors.white,
+        backgroundOpacity: 0.95,
+        borderRadius: 12.0,
+        borderWidth: 0.0,
+        defaultMaxWidth: 280.0,
+        defaultMaxHeight: 250.0,
+      ),
+      baseline: BaselineConfig(
+        show: true,
+        strokeWidth: 2.0,
+        dashPattern: [5.0, 3.0],
+      ),
+      xSpanSlots: 12,
+    );
+
     return Column(
       children: [
-        const Text(
-          'Quarterly Revenue Trend with Key Events',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        _buildExportHeader(
+          context, 
+          'Quarterly Revenue Trend with Key Events', 
+          _chartKey,
+          onExportSvg: () => _exportAreaChartSvg(context, series, style, 'Quarterly Revenue Trend'),
         ),
         const SizedBox(height: 20),
-        MaterialAreaChart(
-          style: AreaChartStyle(
-            forceYAxisFromZero: true,
-            keyEventMarkerConfig: KeyEventMarkerConfig(
-              verticalOffset: 18,
-            ),
-            crosshair: AreaCrosshairConfig(
-                enabled: true,
-                labelStyle: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  backgroundColor: Colors.grey,
-                  color: Colors.white,
-                )),
-            showKeyEventMarkers: true,
-            tooltipStyle: TooltipStyleConfig(
-              backgroundColor: Colors.white,
-              backgroundOpacity: 0.95,
-              borderRadius: 12.0,
-              borderWidth: 0.0,
-              defaultMaxWidth: 280.0,
-              defaultMaxHeight: 250.0,
-            ),
-            baseline: BaselineConfig(
-              show: true,
-              //color: Colors.grey.shade400, // The baseline's default color is the same as the chart's line's color.
-              strokeWidth: 2.0,
-              dashPattern: [5.0, 3.0],
-            ),
-            xSpanSlots: 12,
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialAreaChart(
+            style: style,
+            series: series,
+            width: 350,
+            height: 250,
           ),
-          series: series,
-          width: 350,
-          height: 250,
         ),
         const SizedBox(height: 10),
         const Text(
@@ -439,19 +837,32 @@ class MultiLineChartExample extends StatelessWidget {
       ),
     ];
 
+    const style = MultiLineChartStyle(
+      colors: [Colors.blue, Colors.green, Colors.red],
+      showLegend: true,
+    );
+
     return Column(
       children: [
-        const Text(
-          'Sales vs Profit Comparison',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Sales vs Profit Comparison',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Export SVG',
+              icon: const Icon(Icons.image),
+              onPressed: () => _exportMultiLineChartSvg(context, series, style, 'Sales vs Profit Comparison'),
+            ),
+          ],
         ),
         const SizedBox(height: 20),
         MultiLineChart(
           series: series,
-          style: const MultiLineChartStyle(
-            colors: [Colors.blue, Colors.green, Colors.red],
-            showLegend: true,
-          ),
+          style: style,
           height: 300,
           width: 350,
         ),
@@ -493,17 +904,34 @@ class StackedBarChartExample extends StatelessWidget {
       ),
     ];
 
+    const style = StackedBarChartStyle(
+      barSpacing: 0.2,
+      cornerRadius: 8,
+    );
+
     return Column(
       children: [
-        const Text(
-          'Quarterly Product Sales',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Quarterly Product Sales',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Export SVG',
+              icon: const Icon(Icons.image),
+              onPressed: () => _exportStackedBarChartSvg(context, data, style, 'Quarterly Product Sales'),
+            ),
+          ],
         ),
         const SizedBox(height: 20),
         MaterialStackedBarChart(
           data: data,
           width: 350,
           height: 300,
+          style: style,
         ),
       ],
     );
@@ -708,10 +1136,13 @@ class _HybridChartExampleState extends State<HybridChartExample> {
   double _chartWidth = 800;
   double _chartHeight = 400;
   bool _showChartTypeToggle = true;
+  late List<HybridChartData> _hybridData;
 
+  bool _showPoints = true;
+  double _pointSize = 6.0;
   bool _showVolume = true;
   bool _showVolumeBelow = true;
-  double _volumeBarHeightRatio = 0.5;
+  double _volumeBarHeightRatio = 0.25;
   double _volumeAreaHeightRatio = 0.15;
   double _volumeBarVerticalOffset = 20;
   double _volumeBarWidth = 10;
@@ -724,13 +1155,11 @@ class _HybridChartExampleState extends State<HybridChartExample> {
 
   double _candleWidth = 10.0;
   double _wickWidth = 2.0;
-  double _pointSize = 4.0;
   bool _forceYAxisFromZero = true;
   bool _singleCrosshair = false;
 
   bool _showVerticalLinesAtEveryLabels = false;
   double _defaultLineWidth = 2.0;
-  bool _showPoints = false;
   double _keyEventMarkerVerticalOffset = 18.0;
   double _keyEventMarkerMinHoverRadius = 15.0;
   double _keyEventMarkerSize = 10.0;
@@ -738,13 +1167,15 @@ class _HybridChartExampleState extends State<HybridChartExample> {
   double _volumeTooltipOpacityState = 0.9;
   bool _showKeyEventMarkersState = true;
   double _animationDurationMs = 1500;
+  bool _showPointTooltipOnHover = true;
+  bool _showDragTooltip = true;
 
   double _areaTopOpacity = 0.5;
   double _areaBottomOpacity = 0.0;
 
   int _xSpanSlots = 35;
 
-  EdgeInsets _padding = const EdgeInsets.fromLTRB(10, 10, 60, 10);
+  EdgeInsets _padding = const EdgeInsets.fromLTRB(10, 40, 60, 10);
   double _yAxisTitleGap = 10.0;
   double _xAxisTitleGap = 25.0;
   double _xAxisLabelGap = 8.0;
@@ -759,9 +1190,16 @@ class _HybridChartExampleState extends State<HybridChartExample> {
   double _gridStrokeWidth = 0.5;
   double _gridOpacity = 1.0;
 
+  final GlobalKey _chartKey = GlobalKey();
+
   @override
-  Widget build(BuildContext context) {
-    final hybridData = [
+  void initState() {
+    super.initState();
+    _hybridData = _buildHybridData();
+  }
+
+  List<HybridChartData> _buildHybridData() {
+    return [
       HybridChartData(label: 'Jan 1', open: 100, high: 113, low: 85, close: 105, volume: 10500),
       HybridChartData(label: 'Jan 2', open: 105, high: 112, low: 89, close: 99, volume: 9900),
       HybridChartData(label: 'Jan 3', open: 99, high: 114, low: 83, close: 100, volume: 10000),
@@ -794,6 +1232,66 @@ class _HybridChartExampleState extends State<HybridChartExample> {
       HybridChartData(label: 'Jan 30', open: 111, high: 112, low: 81, close: 88, volume: 8800),
       HybridChartData(label: 'Jan 31', open: 88, high: 102, low: 80, close: 91, volume: 9100),
     ];
+  }
+
+  void _updateHybridPointField(int pointIndex, HybridCandlestickValueType valueType, double newValue) {
+    setState(() {
+      final updated = List<HybridChartData>.from(_hybridData);
+      final old = updated[pointIndex];
+      updated[pointIndex] = old.copyWithCandlestickValue(valueType, newValue);
+      _hybridData = updated;
+    });
+  }
+
+  Future<void> _exportHybridSvg(
+    BuildContext context,
+    HybridChartStyle style,
+    HybridChartAxisConfig axisConfig,
+    List<HybridChartSeries> series,
+    String title,
+  ) async {
+    if (_chartType == HybridChartType.candlestick) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('SVG export currently supports area/line modes only.')),
+      );
+      return;
+    }
+
+    try {
+      final exporter = HybridChartSvgExporter();
+      final svg = exporter.exportSvg(
+        size: Size(_chartWidth, _chartHeight),
+        series: series,
+        style: style,
+        axisConfig: axisConfig,
+        chartType: _chartType,
+        options: HybridChartSvgOptions(
+          includeAxes: true,
+          includeAxisLabels: true,
+          includeGrid: true,
+          includeTitle: true,
+          includeLegend: true,
+          includeVolume: true,
+          includeKeyEvents: true,
+          title: title,
+        ),
+      );
+
+      final file = await _saveSvgToDocuments(svg, fileName: 'hybrid_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+      if (!context.mounted) return;
+
+      await _showSvgPreviewDialog(context, svg, file);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('SVG export failed: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hybridData = _hybridData;
 
     final hybridData2 = [
       HybridChartData(label: 'Jan 1', open: 145, high: 158, low: 130, close: 150, volume: 15000),
@@ -832,109 +1330,133 @@ class _HybridChartExampleState extends State<HybridChartExample> {
       HybridChartSeries(
         name: 'AAPL',
         dataPoints: hybridData,
-        color: Colors.green,
+        color: const ui.Color.fromARGB(255, 189, 149, 27),
       ),
     ];
+    const chartTitle = 'Hybrid Chart (Area + Candlestick + MultiLine)';
+    final axisConfig = HybridChartAxisConfig(
+      yAxisWidth: 0.0,
+      xAxisHeight: 0.0,
+      yAxisPosition: _yAxisPosition,
+      xAxisPosition: _xAxisPosition,
+    );
+    final style = HybridChartStyle.unified(
+      xAxisTitle: 'Date',
+      yAxisTitle: 'Price (USD)',
+      xAxisTitleStyle: TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w600),
+      yAxisTitleStyle: TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.w600),
+      tooltipStyle: TooltipStyleConfig(borderWidth: 10),
+      padding: _padding,
+      chartAreaBackgroundColor: Colors.white,
+      keyEventMarkerConfig: KeyEventMarkerConfig(
+        verticalOffset: _keyEventMarkerVerticalOffset,
+        defaultColor: Colors.red,
+        minHoverRadius: _keyEventMarkerMinHoverRadius,
+        size: _keyEventMarkerSize,
+      ),
+      showVolumeTooltip: _showVolumeTooltip,
+      showVolume: _showVolume,
+      volumeTooltipBackgroundColor: Colors.black,
+      volumeTooltipTextColor: Colors.white,
+      volumeTooltipOpacity: _volumeTooltipOpacityState,
+      volumeTooltipBorderRadius: _volumeTooltipBorderRadiusState,
+      volumeBarColor: Colors.grey,
+      volumeBarOpacity: _volumeBarOpacity,
+      volumeBarWidth: _volumeBarWidth,
+      volumeBarHeightRatio: _volumeBarHeightRatio,
+      volumeAreaHeightRatio: _volumeAreaHeightRatio,
+      showVolumeBelowChart: _showVolumeBelow,
+      volumeBarVerticalOffset: _volumeBarVerticalOffset,
+      showGrid: _showGrid,
+      showPoints: _showPoints,
+      defaultLineWidth: _defaultLineWidth,
+      spacing: 0.2,
+      verticalLineColor: Colors.purple,
+      verticalLineWidth: 0,
+      candleWidth: _candleWidth,
+      wickWidth: _wickWidth,
+      defaultPointSize: _pointSize,
+      forceYAxisFromZero: _forceYAxisFromZero,
+      colors: [Colors.blue, Colors.green, Colors.red],
+      showKeyEventMarkers: _showKeyEventMarkersState,
+      bullishColor: Colors.green,
+      bearishColor: Colors.red,
+      areaFillOpacityTop: _areaTopOpacity,
+      areaFillOpacityBottom: _areaBottomOpacity,
+      yAxisMaxOffset: _yAxisMaxOffset,
+      xAxisTitleGap: _xAxisTitleGap,
+      yAxisTitleGap: _yAxisTitleGap,
+      xAxisLabelGap: _xAxisLabelGap,
+      yAxisLabelGap: _yAxisLabelGap,
+      xSpanSlots: _xSpanSlots,
+      gridColor: Colors.grey,
+      gridStrokeWidth: _gridStrokeWidth,
+      gridOpacity: _gridOpacity,
+      showVerticalLinesAtEveryLabels: _showVerticalLinesAtEveryLabels,
+      yAxisColor: Colors.black,
+      xAxisColor: Colors.black,
+      yAxisOpacity: _yAxisOpacity,
+      xAxisOpacity: _xAxisOpacity,
+      xAxisStrokeWidth: _xAxisStrokeWidth,
+      yAxisStrokeWidth: _yAxisStrokeWidth,
+      autoHorizontalGridLines: _autoHorizontalGridLines,
+      autoVerticalGridLines: _autoVerticalGridLines,
+      animationDuration: Duration(milliseconds: _animationDurationMs.toInt()),
+      singleCrosshair: _singleCrosshair,
+      singleCrosshairOrientation: SingleCrosshairOrientation.vertical,
+      crosshair: AreaCrosshairConfig(
+        lineColor: Colors.grey,
+        lineWidth: 1,
+        showLabel: true,
+        enabled: true,
+      ),
+      baseline: BaselineConfig(
+        show: true,
+        strokeWidth: 1.5,
+        dashPattern: [5.0, 3.0],
+      ),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Hybrid Chart (Area + Candlestick + MultiLine)',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        _buildExportHeader(
+          context,
+          chartTitle,
+          _chartKey,
+          onExportSvg: () => _exportHybridSvg(context, style, axisConfig, hybridSeries, chartTitle),
         ),
         const SizedBox(height: 12),
         SizedBox(
           width: _chartWidth,
           height: _chartHeight,
-          child: MaterialHybridChart(
+          child: RepaintBoundary(
+            key: _chartKey,
+            child: MaterialHybridChart(
+
             showChartTypeToggle: _showChartTypeToggle,
             series: hybridSeries,
             width: _chartWidth,
             height: _chartHeight,
             initialChartType: _chartType,
-            axisConfig: HybridChartAxisConfig(
-              yAxisWidth: 0.0,
-              xAxisHeight: 0.0,
-              yAxisPosition: _yAxisPosition,
-              xAxisPosition: _xAxisPosition,
-            ),
-            style: HybridChartStyle.unified(
-              xAxisTitle: 'Date',
-              yAxisTitle: 'Price (USD)',
-              xAxisTitleStyle: TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w600),
-              yAxisTitleStyle: TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.w600),
-              tooltipStyle: TooltipStyleConfig(borderWidth: 10),
-              padding: _padding,
-              chartAreaBackgroundColor: Colors.white,
-              keyEventMarkerConfig: KeyEventMarkerConfig(
-                verticalOffset: _keyEventMarkerVerticalOffset,
-                defaultColor: Colors.red,
-                minHoverRadius: _keyEventMarkerMinHoverRadius,
-                size: _keyEventMarkerSize,
-              ),
-              showVolumeTooltip: _showVolumeTooltip,
-              showVolume: _showVolume,
-              volumeTooltipBackgroundColor: Colors.black,
-              volumeTooltipTextColor: Colors.white,
-              volumeTooltipOpacity: _volumeTooltipOpacityState,
-              volumeTooltipBorderRadius: _volumeTooltipBorderRadiusState,
-              volumeBarColor: Colors.grey,
-              volumeBarOpacity: _volumeBarOpacity,
-              volumeBarWidth: _volumeBarWidth,
-              volumeBarHeightRatio: _volumeBarHeightRatio,
-              volumeAreaHeightRatio: _volumeAreaHeightRatio,
-              showVolumeBelowChart: _showVolumeBelow,
-              volumeBarVerticalOffset: _volumeBarVerticalOffset,
-              showGrid: _showGrid,
-              showPoints: _showPoints,
-              defaultLineWidth: _defaultLineWidth,
-              spacing: 0.2,
-              verticalLineColor: Colors.purple,
-              verticalLineWidth: 0,
-              candleWidth: _candleWidth,
-              wickWidth: _wickWidth,
-              defaultPointSize: _pointSize,
-              forceYAxisFromZero: _forceYAxisFromZero,
-              colors: [Colors.blue, Colors.green, Colors.red],
-              showKeyEventMarkers: _showKeyEventMarkersState,
-              bullishColor: Colors.green,
-              bearishColor: Colors.red,
-              areaFillOpacityTop: _areaTopOpacity,
-              areaFillOpacityBottom: _areaBottomOpacity,
-              yAxisMaxOffset: _yAxisMaxOffset,
-              xAxisTitleGap: _xAxisTitleGap,
-              yAxisTitleGap: _yAxisTitleGap,
-              xAxisLabelGap: _xAxisLabelGap,
-              yAxisLabelGap: _yAxisLabelGap,
-              xSpanSlots: _xSpanSlots,
-              gridColor: Colors.grey,
-              gridStrokeWidth: _gridStrokeWidth,
-              gridOpacity: _gridOpacity,
-              showVerticalLinesAtEveryLabels: _showVerticalLinesAtEveryLabels,
-              yAxisColor: Colors.black,
-              xAxisColor: Colors.black,
-              yAxisOpacity: _yAxisOpacity,
-              xAxisOpacity: _xAxisOpacity,
-              xAxisStrokeWidth: _xAxisStrokeWidth,
-              yAxisStrokeWidth: _yAxisStrokeWidth,
-              autoHorizontalGridLines: _autoHorizontalGridLines,
-              autoVerticalGridLines: _autoVerticalGridLines,
-              animationDuration: Duration(milliseconds: _animationDurationMs.toInt()),
-              singleCrosshair: _singleCrosshair,
-              singleCrosshairOrientation: SingleCrosshairOrientation.vertical,
-              crosshair: AreaCrosshairConfig(
-                lineColor: Colors.grey,
-                lineWidth: 1,
-                showLabel: true,
-                enabled: true,
-              ),
-              baseline: BaselineConfig(
-                show: true,
-                strokeWidth: 1.5,
-                dashPattern: [5.0, 3.0],
-              ),
-            ),
+            enablePointDrag: true,
+            enableHoverPointScale: true,
+            showPointTooltipOnHover: _showPointTooltipOnHover,
+            showDragTooltip: _showDragTooltip,
+
+            onPointValueChange: (seriesIndex, pointIndex, newValue) {
+              if (seriesIndex != 0) return;
+              if (pointIndex < 0 || pointIndex >= _hybridData.length) return;
+              _updateHybridPointField(pointIndex, HybridCandlestickValueType.close, newValue);
+            },
+            onCandlestickValueChange: (seriesIndex, pointIndex, valueType, newValue) {
+              if (seriesIndex != 0) return;
+              if (pointIndex < 0 || pointIndex >= _hybridData.length) return;
+              _updateHybridPointField(pointIndex, valueType, newValue);
+            },
+            axisConfig: axisConfig,
+            style: style,
+          ),
           ),
         ),
         const SizedBox(height: 12),
@@ -946,6 +1468,19 @@ class _HybridChartExampleState extends State<HybridChartExample> {
               children: [
                 Wrap(spacing: 16, runSpacing: 8, children: [
                   const Text('For debugging: '),
+                  Row(children: [
+                    const Text('Show Points'),
+                    Switch(value: _showPoints, onChanged: (v) => setState(() => _showPoints = v)),
+                  ]),
+                  _buildSlider('Point Size', _pointSize, 1, 12, (v) => setState(() => _pointSize = v)),
+                  Row(children: [
+                    const Text('Show Point Tooltip On Hover'),
+                    Switch(value: _showPointTooltipOnHover, onChanged: (v) => setState(() => _showPointTooltipOnHover = v)),
+                  ]),
+                  Row(children: [
+                    const Text('Show Drag Tooltip'),
+                    Switch(value: _showDragTooltip, onChanged: (v) => setState(() => _showDragTooltip = v)),
+                  ]),
                   Row(children: [
                     const Text('Show Volume'),
                     Switch(value: _showVolume, onChanged: (v) => setState(() => _showVolume = v)),
@@ -995,11 +1530,6 @@ class _HybridChartExampleState extends State<HybridChartExample> {
                 _buildSlider('Volume Opacity', _volumeBarOpacity, 0.0, 1.0, (v) => setState(() => _volumeBarOpacity = v)),
                 _buildSlider('Volume Tooltip Border Radius', _volumeTooltipBorderRadiusState, 0, 40, (v) => setState(() => _volumeTooltipBorderRadiusState = v)),
                 _buildSlider('Volume Tooltip Opacity', _volumeTooltipOpacityState, 0.0, 1.0, (v) => setState(() => _volumeTooltipOpacityState = v)),
-                Row(children: [
-                  const Text('Show Points'),
-                  Switch(value: _showPoints, onChanged: (v) => setState(() => _showPoints = v)),
-                ]),
-                _buildSlider('Point Size', _pointSize, 1, 12, (v) => setState(() => _pointSize = v)),
                 _buildSlider('Default Line Width', _defaultLineWidth, 0.0, 10.0, (v) => setState(() => _defaultLineWidth = v)),
                 _buildSlider('Area Top Opacity', _areaTopOpacity, 0.0, 1.0, (v) => setState(() => _areaTopOpacity = v)),
                 _buildSlider('Area Bottom Opacity', _areaBottomOpacity, 0.0, 1.0, (v) => setState(() => _areaBottomOpacity = v)),
@@ -1077,6 +1607,10 @@ class _HybridChartExampleState extends State<HybridChartExample> {
       _chartType = HybridChartType.candlestick;
       _chartWidth = 800;
       _chartHeight = 400;
+      
+      _showPoints = true;
+      _pointSize = 6.0;
+
       _showChartTypeToggle = false;
       _showVolume = true;
       _showVolumeBelow = true;
@@ -1091,7 +1625,6 @@ class _HybridChartExampleState extends State<HybridChartExample> {
       _autoVerticalGridLines = 3;
       _candleWidth = 10.0;
       _wickWidth = 2.0;
-      _pointSize = 4.0;
       _forceYAxisFromZero = true;
       _singleCrosshair = false;
       _areaTopOpacity = 0.5;
@@ -1114,13 +1647,43 @@ class _HybridChartExampleState extends State<HybridChartExample> {
       _gridOpacity = 1.0;
       _showVerticalLinesAtEveryLabels = false;
       _defaultLineWidth = 2.0;
-      _showPoints = false;
       _keyEventMarkerVerticalOffset = 18.0;
       _keyEventMarkerMinHoverRadius = 15.0;
       _volumeTooltipBorderRadiusState = 6.0;
       _volumeTooltipOpacityState = 0.9;
       _showKeyEventMarkersState = true;
       _animationDurationMs = 1500;
+      _showPointTooltipOnHover = true;
+      _showDragTooltip = true;
     });
   }
+}
+
+class _TransparencyCheckerboard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _CheckerboardPainter(),
+    );
+  }
+}
+
+class _CheckerboardPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    const squareSize = 12.0;
+    final light = Paint()..color = const Color(0xFFE6E6E6);
+    final dark = Paint()..color = const Color(0xFFCCCCCC);
+
+    for (double y = 0; y < size.height; y += squareSize) {
+      for (double x = 0; x < size.width; x += squareSize) {
+        final isDark = ((x / squareSize).floor() + (y / squareSize).floor()) % 2 == 0;
+        final rect = Rect.fromLTWH(x, y, squareSize, squareSize);
+        canvas.drawRect(rect, isDark ? dark : light);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
