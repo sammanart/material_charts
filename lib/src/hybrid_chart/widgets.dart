@@ -34,6 +34,7 @@ class MaterialHybridChart extends StatefulWidget {
   final double hoverPointScale;
   final bool showPointTooltipOnHover;
   final bool showDragTooltip;
+
   /// When true and `style.showVolume` is enabled, render the volume bars
   /// in a separate area below the main plotting area instead of inside
   /// the main chart area.
@@ -131,8 +132,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
   void didUpdateWidget(covariant MaterialHybridChart oldWidget) {
     super.didUpdateWidget(oldWidget);
     // If animation duration or curve changed, update controller
-    if (oldWidget.style.animationDuration != widget.style.animationDuration ||
-        oldWidget.style.animationCurve != widget.style.animationCurve) {
+    if (oldWidget.style.animationDuration != widget.style.animationDuration || oldWidget.style.animationCurve != widget.style.animationCurve) {
       _controller.duration = widget.style.animationDuration;
       // Recreate the animation with the new curve
       _animation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -164,10 +164,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
     }
 
     // Check for point hover tooltips in area/line modes first if enabled
-    if (widget.showPointTooltipOnHover && 
-        (_currentChartType == HybridChartType.area || 
-         _currentChartType == HybridChartType.multiLine || 
-         _currentChartType == HybridChartType.line)) {
+    if (widget.showPointTooltipOnHover && (_currentChartType == HybridChartType.area || _currentChartType == HybridChartType.multiLine || _currentChartType == HybridChartType.line)) {
       final pointHit = _checkPointHover(chartArea, pointerPosition);
       if (pointHit != null) return pointHit;
     }
@@ -257,9 +254,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
             continue;
           }
           // Build HTML similar to candlestick painter's tooltip
-            final dateStr = (data.label.trim().isNotEmpty)
-              ? data.label
-              : DateFormat('MMM dd, yyyy').format(DateTime.now());
+          final dateStr = (data.label.trim().isNotEmpty) ? data.label : DateFormat('MMM dd, yyyy').format(DateTime.now());
           final html = '''
             <div style="font-family: Arial, sans-serif; padding:6px;">
               <div style="font-weight:bold;margin-bottom:6px;">$dateStr</div>
@@ -425,9 +420,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
             return _PointDrag(seriesIdx, i, HybridCandlestickValueType.close);
           }
           if (hitBody) {
-            final target = (position.dy - openY).abs() <= (position.dy - closeY).abs()
-                ? HybridCandlestickValueType.open
-                : HybridCandlestickValueType.close;
+            final target = (position.dy - openY).abs() <= (position.dy - closeY).abs() ? HybridCandlestickValueType.open : HybridCandlestickValueType.close;
             return _PointDrag(seriesIdx, i, target);
           }
         }
@@ -776,136 +769,135 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
             }
           }
 
-            return Column(
-          mainAxisSize: MainAxisSize.max,
-      children: [
-        // Title and chart type switcher
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          return Column(
+            mainAxisSize: MainAxisSize.max,
             children: [
-              if (widget.title != null)
-                Text(
-                  widget.title!,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              // Chart type toggle
-              if (widget.showChartTypeToggle)
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+              // Title and chart type switcher
+              if (widget.title != null || widget.showChartTypeToggle)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      for (final type in HybridChartType.values)
-                        GestureDetector(
-                          onTap: () => _switchChartType(type),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _currentChartType == type
-                                  ? Colors.blue.withValues(alpha: 0.2)
-                                  : Colors.transparent,
-                              border: _currentChartType == type
-                                  ? Border(
-                                      bottom: BorderSide(
-                                        color: Colors.blue,
-                                        width: 2,
+                      if (widget.title != null)
+                        Text(
+                          widget.title!,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      // Chart type toggle
+                      if (widget.showChartTypeToggle)
+                        Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            children: [
+                              for (final type in HybridChartType.values)
+                                GestureDetector(
+                                  onTap: () => _switchChartType(type),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: _currentChartType == type ? Colors.blue.withValues(alpha: 0.2) : Colors.transparent,
+                                      border: _currentChartType == type
+                                          ? Border(
+                                              bottom: BorderSide(
+                                                color: Colors.blue,
+                                                width: 2,
+                                              ),
+                                            )
+                                          : null,
+                                    ),
+                                    child: Text(
+                                      type.displayName,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: _currentChartType == type ? FontWeight.bold : FontWeight.normal,
+                                        color: _currentChartType == type ? Colors.blue : Colors.grey,
                                       ),
-                                    )
-                                  : null,
-                            ),
-                            child: Text(
-                              type.displayName,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: _currentChartType == type ? FontWeight.bold : FontWeight.normal,
-                                color: _currentChartType == type ? Colors.blue : Colors.grey,
-                              ),
-                            ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                     ],
+                  ),
+                ),
+
+              // Chart
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanStart: (details) {
+                    _tryStartPointDrag(mainArea, details.localPosition);
+                  },
+                  onPanUpdate: (details) {
+                    if (_activeDragPoint != null) {
+                      _updateDraggedPoint(mainArea, details.localPosition);
+                      return;
+                    }
+                    _handlePanUpdate(details);
+                  },
+                  onPanEnd: (_) => _endPointDrag(),
+                  onPanCancel: _endPointDrag,
+                  child: MouseRegion(
+                    onEnter: (_) => setState(() => _hoverPosition = null),
+                    onHover: (details) {
+                      if (_activeDragPoint != null) {
+                        setState(() => _hoverPosition = details.localPosition);
+                        return;
+                      }
+                      setState(() {
+                        _hoverPosition = details.localPosition;
+                        _updateActiveTooltip(mainArea, details.localPosition);
+                      });
+                    },
+                    onExit: (_) => setState(() {
+                      _hoverPosition = null;
+                      _activeHtmlTooltip = null;
+                      _activeTooltipPosition = null;
+                    }),
+                    child: SizedBox(
+                      width: constraints.maxWidth,
+                      child: Stack(
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: widget.backgroundColor ?? Colors.white,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: AnimatedBuilder(
+                              animation: _animation,
+                              builder: (context, _) {
+                                return CustomPaint(
+                                  size: Size(constraints.maxWidth, actualHeight),
+                                  painter: HybridChartPainter(
+                                    series: widget.series,
+                                    progress: _animation.value,
+                                    style: widget.style,
+                                    axisConfig: widget.axisConfig,
+                                    chartType: _currentChartType,
+                                    hoverPosition: _hoverPosition,
+                                    scrollOffset: _scrollOffset,
+                                    volumeBelowChart: widget.style.showVolumeBelowChart,
+                                    enableHoverPointScale: widget.enableHoverPointScale,
+                                    hoverPointScale: widget.hoverPointScale,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          // Tooltip overlay
+                          _buildHtmlTooltip(constraints.maxWidth, actualHeight),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
-          ),
-        ),
-
-        // Chart
-        Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onPanStart: (details) {
-              _tryStartPointDrag(mainArea, details.localPosition);
-            },
-            onPanUpdate: (details) {
-              if (_activeDragPoint != null) {
-                _updateDraggedPoint(mainArea, details.localPosition);
-                return;
-              }
-              _handlePanUpdate(details);
-            },
-            onPanEnd: (_) => _endPointDrag(),
-            onPanCancel: _endPointDrag,
-            child: MouseRegion(
-              onEnter: (_) => setState(() => _hoverPosition = null),
-              onHover: (details) {
-                if (_activeDragPoint != null) {
-                  setState(() => _hoverPosition = details.localPosition);
-                  return;
-                }
-                setState(() {
-                  _hoverPosition = details.localPosition;
-                  _updateActiveTooltip(mainArea, details.localPosition);
-                });
-              },
-              onExit: (_) => setState(() {
-                _hoverPosition = null;
-                _activeHtmlTooltip = null;
-                _activeTooltipPosition = null;
-              }),
-              child: SizedBox(
-                width: constraints.maxWidth,
-                child: Stack(
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        color: widget.backgroundColor ?? Colors.white,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: AnimatedBuilder(
-                        animation: _animation,
-                        builder: (context, _) {
-                          return CustomPaint(
-                            size: Size(constraints.maxWidth, actualHeight),
-                            painter: HybridChartPainter(
-                              series: widget.series,
-                              progress: _animation.value,
-                              style: widget.style,
-                              axisConfig: widget.axisConfig,
-                              chartType: _currentChartType,
-                              hoverPosition: _hoverPosition,
-                              scrollOffset: _scrollOffset,
-                              volumeBelowChart: widget.style.showVolumeBelowChart,
-                              enableHoverPointScale: widget.enableHoverPointScale,
-                              hoverPointScale: widget.hoverPointScale,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    // Tooltip overlay
-                    _buildHtmlTooltip(constraints.maxWidth, actualHeight),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
           );
         },
       ),
