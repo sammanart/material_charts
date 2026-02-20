@@ -874,7 +874,6 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
                     Container(
                       decoration: BoxDecoration(
                         color: widget.backgroundColor ?? Colors.white,
-                        border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: AnimatedBuilder(
