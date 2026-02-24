@@ -558,7 +558,7 @@ class PieChartExample extends StatelessWidget {
       const PieChartData(value: 10, label: 'Other', color: Colors.purple),
     ];
 
-    const style = PieChartStyle(
+    const style = PieChartStyle(holeRadius: 0.5,backgroundColor: Colors.transparent,
       showLegend: true,
       legendPosition: PieChartLegendPosition.bottom,
     );

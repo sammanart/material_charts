@@ -1,5 +1,7 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
+
 import 'models.dart';
 
 /// Custom painter class for rendering a pie chart.
@@ -84,7 +86,19 @@ class PieChartPainter extends CustomPainter {
     // Calculate the total value of all segments for percentage calculations.
     final total = data.fold(0.0, (sum, item) => sum + item.value);
     // Convert the starting angle from degrees to radians.
-    var startAngle = style.startAngle * pi / 180;
+    final startAngleBase = style.startAngle * pi / 180;
+    var startAngle = startAngleBase;
+    final sweepAngles = <double>[];
+    final wantsClearHole =
+        style.holeRadius > 0 && style.backgroundColor.opacity == 0;
+
+    if (wantsClearHole) {
+      // Use a slightly larger radius to accommodate hovered segment expansion (1.05x)
+      canvas.saveLayer(
+        Rect.fromCircle(center: center, radius: radius * 1.1),
+        Paint(),
+      );
+    }
 
     // Iterate through each data point to draw the respective pie slice.
     for (int i = 0; i < data.length; i++) {
@@ -113,31 +127,42 @@ class PieChartPainter extends CustomPainter {
         paint,
       );
 
-      // Draw hole in the center if specified (for doughnut charts).
-      if (style.holeRadius > 0) {
-        canvas.drawCircle(
-          center,
-          radius * style.holeRadius,
-          Paint()..color = style.backgroundColor,
-        );
-      }
-
-      // Draw labels and values if enabled in the style.
-      if ((style.showLabels || style.showValues) &&
-          (!showLabelOnlyOnHover || hoveredSegmentIndex == i)) {
-        _drawLabelsAndValues(
-          canvas,
-          center,
-          radius,
-          startAngle,
-          sweepAngle,
-          i,
-          total,
-        );
-      }
+      sweepAngles.add(sweepAngle);
 
       // Update the starting angle for the next slice.
       startAngle += sweepAngle;
+    }
+
+    // Draw hole in the center if specified (for doughnut charts).
+    if (style.holeRadius > 0) {
+      final holePaint = Paint()
+        ..color = style.backgroundColor
+        ..blendMode = wantsClearHole ? BlendMode.clear : BlendMode.srcOver;
+      canvas.drawCircle(center, radius * style.holeRadius, holePaint);
+    }
+
+    if (wantsClearHole) {
+      canvas.restore();
+    }
+
+    // Draw labels and values if enabled in the style.
+    if (style.showLabels || style.showValues) {
+      startAngle = startAngleBase;
+      for (int i = 0; i < data.length; i++) {
+        final sweepAngle = sweepAngles[i];
+        if (!showLabelOnlyOnHover || hoveredSegmentIndex == i) {
+          _drawLabelsAndValues(
+            canvas,
+            center,
+            radius,
+            startAngle,
+            sweepAngle,
+            i,
+            total,
+          );
+        }
+        startAngle += sweepAngle;
+      }
     }
   }
 

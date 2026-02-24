@@ -67,13 +67,8 @@ class PieChartSvgExporter {
       Vertical.bottom => height - (padding.bottom + radius),
     };
     
-    // Draw segments
+    // Draw segments (including donut holes if configured)
     body.writeln(_drawSegments(Offset(centerX, centerY), radius, data, style, options));
-    
-    // Draw hole for doughnut chart
-    if (style.holeRadius > 0) {
-      body.writeln(_circle(centerX, centerY, radius * style.holeRadius, _colorToRgba(style.backgroundColor)));
-    }
     
     // Draw legend
     if (options.showLegend && style.showLegend) {
@@ -98,13 +93,22 @@ class PieChartSvgExporter {
     final items = <String>[];
     final total = data.fold(0.0, (sum, item) => sum + item.value);
     var startAngle = style.startAngle * pi / 180;
+    final innerRadius = radius * style.holeRadius;
+    final hasHole = style.holeRadius > 0;
     
     for (int i = 0; i < data.length; i++) {
       final sweepAngle = (data[i].value / total) * 2 * pi;
       final segmentColor = data[i].color ?? style.defaultColors[i % style.defaultColors.length];
       
       // Draw arc
-      items.add(_drawArc(center, radius, startAngle, sweepAngle, segmentColor));
+      items.add(_drawArc(
+        center,
+        radius,
+        hasHole ? innerRadius : null,
+        startAngle,
+        sweepAngle,
+        segmentColor,
+      ));
       
       // Draw labels and values
       if (options.showLabels || options.showValues) {
@@ -126,7 +130,14 @@ class PieChartSvgExporter {
     return items.join('\n');
   }
   
-  static String _drawArc(Offset center, double radius, double startAngle, double sweepAngle, Color color) {
+  static String _drawArc(
+    Offset center,
+    double radius,
+    double? innerRadius,
+    double startAngle,
+    double sweepAngle,
+    Color color,
+  ) {
     final endAngle = startAngle + sweepAngle;
     
     // Calculate start and end points
@@ -140,10 +151,22 @@ class PieChartSvgExporter {
     
     // Build path
     final path = StringBuffer();
-    path.write('M ${center.dx} ${center.dy} '); // Move to center
-    path.write('L $startX $startY '); // Line to arc start
-    path.write('A $radius $radius 0 $largeArcFlag 1 $endX $endY '); // Arc
-    path.write('Z'); // Close path
+    if (innerRadius != null && innerRadius > 0) {
+      final innerStartX = center.dx + cos(startAngle) * innerRadius;
+      final innerStartY = center.dy + sin(startAngle) * innerRadius;
+      final innerEndX = center.dx + cos(endAngle) * innerRadius;
+      final innerEndY = center.dy + sin(endAngle) * innerRadius;
+      path.write('M $startX $startY '); // Move to outer arc start
+      path.write('A $radius $radius 0 $largeArcFlag 1 $endX $endY '); // Outer arc
+      path.write('L $innerEndX $innerEndY '); // Line to inner arc end
+      path.write('A $innerRadius $innerRadius 0 $largeArcFlag 0 $innerStartX $innerStartY '); // Inner arc
+      path.write('Z'); // Close path
+    } else {
+      path.write('M ${center.dx} ${center.dy} '); // Move to center
+      path.write('L $startX $startY '); // Line to arc start
+      path.write('A $radius $radius 0 $largeArcFlag 1 $endX $endY '); // Arc
+      path.write('Z'); // Close path
+    }
     
     return '<path d="$path" fill="${_colorToRgba(color)}"/>';
   }
