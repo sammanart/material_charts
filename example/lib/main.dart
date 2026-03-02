@@ -864,7 +864,7 @@ class PopulationChartExample extends StatelessWidget {
     ];
 
     const style = PopulationPyramidStyle(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Colors.white,
       leftColor: Color(0xFF4A90E2),
       rightColor: Color(0xFFED6D91),
       labelColor: Colors.black87,
@@ -881,7 +881,7 @@ class PopulationChartExample extends StatelessWidget {
       showLegend: true,
       showValues: true,
       showPercentage: true,
-      centerGap: 40.0,
+      centerGap: 80.0,
       legendPosition: PyramidLegendPosition.bottomCenter,
       legendGapFromChart: 0.0,
       barValueGap: 12.0,

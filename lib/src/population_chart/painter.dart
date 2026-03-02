@@ -64,12 +64,15 @@ class PopulationPyramidPainter extends CustomPainter {
 
     final barHeight = availableHeight / (data.length + 1);
     final centerX = size.width / 2;
-    final maxPopulation = data.fold<double>(
+    
+    // Calculate max populations for each side independently for proper scaling
+    final maxLeftPopulation = data.fold<double>(
       0,
-      (prev, item) =>
-          prev > (item.leftPopulation + item.rightPopulation)
-              ? prev
-              : item.leftPopulation + item.rightPopulation,
+      (prev, item) => prev > item.leftPopulation ? prev : item.leftPopulation,
+    );
+    final maxRightPopulation = data.fold<double>(
+      0,
+      (prev, item) => prev > item.rightPopulation ? prev : item.rightPopulation,
     );
 
     // Draw grid lines if enabled
@@ -83,12 +86,13 @@ class PopulationPyramidPainter extends CustomPainter {
       final y = effectiveTopPadding + (i + 0.5) * barHeight;
 
       // Calculate bar widths (using centerGap for spacing)
+      // Scale each side independently for better visual representation
       final halfGap = style.centerGap / 2;
       final maxBarWidth = (availableWidth / 2) - halfGap - style.barHorizontalMargin;
-      final leftWidth = (dataPoint.leftPopulation / maxPopulation) *
+      final leftWidth = (dataPoint.leftPopulation / maxLeftPopulation) *
           maxBarWidth *
           progress;
-      final rightWidth = (dataPoint.rightPopulation / maxPopulation) *
+      final rightWidth = (dataPoint.rightPopulation / maxRightPopulation) *
           maxBarWidth *
           progress;
 
