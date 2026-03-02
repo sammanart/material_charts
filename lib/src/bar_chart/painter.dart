@@ -1,5 +1,7 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
+
 import 'models.dart';
 
 /// Custom painter for rendering a bar chart with rotation support.
@@ -96,34 +98,286 @@ class BarChartPainter extends CustomPainter {
 
   /// Draws the bars on the chart.
   void _drawBars(Canvas canvas, Rect chartArea, bool isHorizontal) {
-    final maxValue = data
-        .map((point) => point.value)
-        .reduce(max); // Find the max value for scaling
+    final range = _resolveValueRange();
 
-    if (isHorizontal) {
-      _drawHorizontalBars(canvas, chartArea, maxValue);
+    if (style.groupByLabel) {
+      // If grouping is enabled, use grouped drawing logic
+      if (isHorizontal) {
+        _drawGroupedHorizontalBars(canvas, chartArea, range);
+      } else {
+        _drawGroupedVerticalBars(canvas, chartArea, range);
+      }
     } else {
-      _drawVerticalBars(canvas, chartArea, maxValue);
+      // Original drawing logic
+      if (isHorizontal) {
+        _drawHorizontalBars(canvas, chartArea, range);
+      } else {
+        _drawVerticalBars(canvas, chartArea, range);
+      }
     }
   }
 
-  /// Draws vertical bars (default mode, 0° or 180°)
-  void _drawVerticalBars(Canvas canvas, Rect chartArea, double maxValue) {
-    final barWidth = (chartArea.width / data.length) * (1 - style.barSpacing);
-    final spacing = (chartArea.width / data.length) * style.barSpacing;
+  _ValueRange _resolveValueRange() {
+    final minValue = data.map((point) => point.value).reduce(min);
+    final maxValue = data.map((point) => point.value).reduce(max);
+
+    double lower = min(minValue, 0.0);
+    double upper = max(maxValue, 0.0);
+
+    if (lower == upper) {
+      if (upper == 0.0) {
+        upper = 1.0;
+      } else if (upper > 0) {
+        lower = 0.0;
+      } else {
+        upper = 0.0;
+      }
+    }
+
+    final span = upper - lower;
+    return _ValueRange(lower: lower, upper: upper, span: span <= 0 ? 1.0 : span);
+  }
+
+  double _valueToVerticalY(
+    double value,
+    Rect chartArea,
+    _ValueRange range,
+    bool isInverted,
+  ) {
+    final normalized = (value - range.lower) / range.span;
+    if (isInverted) {
+      return chartArea.top + (normalized * chartArea.height);
+    }
+    return chartArea.bottom - (normalized * chartArea.height);
+  }
+
+  double _valueToHorizontalX(
+    double value,
+    Rect chartArea,
+    _ValueRange range,
+    bool isReversed,
+  ) {
+    final normalized = (value - range.lower) / range.span;
+    if (isReversed) {
+      return chartArea.right - (normalized * chartArea.width);
+    }
+    return chartArea.left + (normalized * chartArea.width);
+  }
+
+  double _sanitizeSpacing(double spacing) {
+    return spacing.clamp(0.0, 0.95).toDouble();
+  }
+
+  double _groupInnerGapRatio() {
+    if (style.barSpacing <= 0) return 0.0;
+    return (style.barSpacing * 0.5).clamp(0.0, 0.25).toDouble();
+  }
+
+  /// Groups data by label, returning a list of label groups with their bars.
+  List<MapEntry<String, List<int>>> _groupDataByLabel() {
+    final grouped = <String, List<int>>{};
+    for (int i = 0; i < data.length; i++) {
+      final label = data[i].label;
+      grouped.putIfAbsent(label, () => []).add(i);
+    }
+    return grouped.entries.toList();
+  }
+
+  /// Draws vertical bars grouped by label (when groupByLabel is enabled)
+  void _drawGroupedVerticalBars(
+    Canvas canvas,
+    Rect chartArea,
+    _ValueRange range,
+  ) {
+    final groups = _groupDataByLabel();
+    if (groups.isEmpty) return;
     final isInverted = _isInverted();
+    final zeroY = _valueToVerticalY(0, chartArea, range, isInverted);
+
+    // Space allocated for each label group
+    final spacingRatio = _sanitizeSpacing(style.barSpacing);
+    final groupUnitWidth = chartArea.width / groups.length;
+    final groupWidth = groupUnitWidth * (1 - spacingRatio);
+    final groupSpacing = groupUnitWidth * spacingRatio;
+
+    // Width of each individual bar within a group
+    final barsPerGroup = max(
+      1,
+      groups.fold<int>(0, (prev, group) => group.value.length > prev ? group.value.length : prev),
+    );
+    final slotWidth = groupWidth / barsPerGroup;
+    final innerGap = barsPerGroup > 1 ? slotWidth * _groupInnerGapRatio() : 0.0;
+    final barWidth = max(0.0, slotWidth - innerGap);
+
+    for (int g = 0; g < groups.length; g++) {
+      final group = groups[g];
+      final groupX =
+          chartArea.left + (g * (groupWidth + groupSpacing)) + (groupSpacing / 2);
+
+      // Draw bars for each series in this label group
+      for (int b = 0; b < group.value.length; b++) {
+        final dataIndex = group.value[b];
+        final barX = groupX + (b * slotWidth) + (innerGap / 2);
+
+        final valueY =
+            _valueToVerticalY(data[dataIndex].value, chartArea, range, isInverted);
+        final fullHeight = (valueY - zeroY).abs();
+        final barHeight = fullHeight * progress;
+        final barTop = valueY < zeroY ? zeroY - barHeight : zeroY;
+
+        final rect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(barX, barTop, barWidth, barHeight),
+          Radius.circular(style.cornerRadius),
+        );
+
+        final paint = Paint()..style = PaintingStyle.fill;
+
+        // Apply colors and gradients
+        _applyBarStyle(
+          paint,
+          rect,
+          dataIndex,
+          isInverted ? Alignment.topCenter : Alignment.bottomCenter,
+          isInverted ? Alignment.bottomCenter : Alignment.topCenter,
+        );
+
+        if (_isRectHovered(rect.outerRect)) {
+          _applyHoverEffect(
+            canvas,
+            rect,
+            paint,
+            dataIndex,
+            isInverted ? Alignment.topCenter : Alignment.bottomCenter,
+            isInverted ? Alignment.bottomCenter : Alignment.topCenter,
+          );
+        }
+
+        canvas.drawRRect(rect, paint);
+
+        // Draw value labels
+        if (showValues) {
+          final isUpward = valueY < zeroY;
+          _drawValueLabel(
+            canvas,
+            data[dataIndex].value,
+            Offset(
+              barX + barWidth / 2,
+              isUpward ? (barTop - 4) : (barTop + barHeight + 4),
+            ),
+            data[dataIndex].color ?? style.barColor,
+            isAbove: isUpward,
+          );
+        }
+      }
+    }
+  }
+
+  /// Draws horizontal bars grouped by label (when groupByLabel is enabled)
+  void _drawGroupedHorizontalBars(
+    Canvas canvas,
+    Rect chartArea,
+    _ValueRange range,
+  ) {
+    final groups = _groupDataByLabel();
+    if (groups.isEmpty) return;
+    final isReversed = style.rotation >= 225 && style.rotation < 315; // 270° mode
+    final zeroX = _valueToHorizontalX(0, chartArea, range, isReversed);
+
+    // Space allocated for each label group
+    final spacingRatio = _sanitizeSpacing(style.barSpacing);
+    final groupUnitHeight = chartArea.height / groups.length;
+    final groupHeight = groupUnitHeight * (1 - spacingRatio);
+    final groupSpacing = groupUnitHeight * spacingRatio;
+
+    // Height of each individual bar within a group
+    final barsPerGroup = max(
+      1,
+      groups.fold<int>(0, (prev, group) => group.value.length > prev ? group.value.length : prev),
+    );
+    final slotHeight = groupHeight / barsPerGroup;
+    final innerGap = barsPerGroup > 1 ? slotHeight * _groupInnerGapRatio() : 0.0;
+    final barHeight = max(0.0, slotHeight - innerGap);
+
+    for (int g = 0; g < groups.length; g++) {
+      final group = groups[g];
+      final groupY =
+          chartArea.top + (g * (groupHeight + groupSpacing)) + (groupSpacing / 2);
+
+      // Draw bars for each series in this label group
+      for (int b = 0; b < group.value.length; b++) {
+        final dataIndex = group.value[b];
+        final barY = groupY + (b * slotHeight) + (innerGap / 2);
+        final valueX =
+            _valueToHorizontalX(data[dataIndex].value, chartArea, range, isReversed);
+        final fullWidth = (valueX - zeroX).abs();
+        final barWidth = fullWidth * progress;
+        final barLeft = valueX < zeroX ? zeroX - barWidth : zeroX;
+
+        final rect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(barLeft, barY, barWidth, barHeight),
+          Radius.circular(style.cornerRadius),
+        );
+
+        final paint = Paint()..style = PaintingStyle.fill;
+
+        // Apply colors and gradients
+        _applyBarStyle(
+          paint,
+          rect,
+          dataIndex,
+          isReversed ? Alignment.centerRight : Alignment.centerLeft,
+          isReversed ? Alignment.centerLeft : Alignment.centerRight,
+        );
+
+        if (_isRectHovered(rect.outerRect)) {
+          _applyHoverEffect(
+            canvas,
+            rect,
+            paint,
+            dataIndex,
+            isReversed ? Alignment.centerRight : Alignment.centerLeft,
+            isReversed ? Alignment.centerLeft : Alignment.centerRight,
+          );
+        }
+
+        canvas.drawRRect(rect, paint);
+
+        // Draw value labels
+        if (showValues) {
+          final isToRight = valueX > zeroX;
+          _drawValueLabel(
+            canvas,
+            data[dataIndex].value,
+            Offset(
+              isToRight ? barLeft + barWidth + 4 : barLeft - 4,
+              barY + barHeight / 2,
+            ),
+            data[dataIndex].color ?? style.barColor,
+            isAbove: false,
+            isLeftAligned: !isToRight,
+          );
+        }
+      }
+    }
+  }
+
+  void _drawVerticalBars(Canvas canvas, Rect chartArea, _ValueRange range) {
+    final spacingRatio = _sanitizeSpacing(style.barSpacing);
+    final unitWidth = chartArea.width / data.length;
+    final barWidth = unitWidth * (1 - spacingRatio);
+    final spacing = unitWidth * spacingRatio;
+    final isInverted = _isInverted();
+    final zeroY = _valueToVerticalY(0, chartArea, range, isInverted);
 
     for (int i = 0; i < data.length; i++) {
-      final barHeight =
-          (data[i].value / maxValue) * chartArea.height * progress;
       final barX = chartArea.left + (i * (barWidth + spacing)) + (spacing / 2);
-
-      final barY = isInverted
-          ? chartArea.top // Start from top when inverted
-          : chartArea.bottom - barHeight; // Start from bottom normally
+      final valueY = _valueToVerticalY(data[i].value, chartArea, range, isInverted);
+      final fullHeight = (valueY - zeroY).abs();
+      final barHeight = fullHeight * progress;
+      final barTop = valueY < zeroY ? zeroY - barHeight : zeroY;
 
       final rect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(barX, barY, barWidth, barHeight),
+        Rect.fromLTWH(barX, barTop, barWidth, barHeight),
         Radius.circular(style.cornerRadius),
       );
 
@@ -138,8 +392,7 @@ class BarChartPainter extends CustomPainter {
         isInverted ? Alignment.bottomCenter : Alignment.topCenter,
       );
 
-      // Apply hover effect
-      if (_isBarHovered(i, chartArea, barWidth, spacing, isHorizontal: false)) {
+      if (_isRectHovered(rect.outerRect)) {
         _applyHoverEffect(
           canvas,
           rect,
@@ -154,37 +407,40 @@ class BarChartPainter extends CustomPainter {
 
       // Draw value labels (always horizontal)
       if (showValues) {
+        final isUpward = valueY < zeroY;
         _drawValueLabel(
           canvas,
           data[i].value,
           Offset(
             barX + barWidth / 2,
-            isInverted ? barY + barHeight + 8 : barY - 4,
+            isUpward ? (barTop - 4) : (barTop + barHeight + 4),
           ),
           data[i].color ?? style.barColor,
-          isAbove: !isInverted,
+          isAbove: isUpward,
         );
       }
     }
   }
 
   /// Draws horizontal bars (90° or 270°)
-  void _drawHorizontalBars(Canvas canvas, Rect chartArea, double maxValue) {
-    final barHeight = (chartArea.height / data.length) * (1 - style.barSpacing);
-    final spacing = (chartArea.height / data.length) * style.barSpacing;
+  void _drawHorizontalBars(Canvas canvas, Rect chartArea, _ValueRange range) {
+    final spacingRatio = _sanitizeSpacing(style.barSpacing);
+    final unitHeight = chartArea.height / data.length;
+    final barHeight = unitHeight * (1 - spacingRatio);
+    final spacing = unitHeight * spacingRatio;
     final isReversed =
         style.rotation >= 225 && style.rotation < 315; // 270° mode
+    final zeroX = _valueToHorizontalX(0, chartArea, range, isReversed);
 
     for (int i = 0; i < data.length; i++) {
-      final barWidth = (data[i].value / maxValue) * chartArea.width * progress;
       final barY = chartArea.top + (i * (barHeight + spacing)) + (spacing / 2);
-
-      final barX = isReversed
-          ? chartArea.right - barWidth // Start from right when reversed
-          : chartArea.left; // Start from left normally
+      final valueX = _valueToHorizontalX(data[i].value, chartArea, range, isReversed);
+      final fullWidth = (valueX - zeroX).abs();
+      final barWidth = fullWidth * progress;
+      final barLeft = valueX < zeroX ? zeroX - barWidth : zeroX;
 
       final rect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(barX, barY, barWidth, barHeight),
+        Rect.fromLTWH(barLeft, barY, barWidth, barHeight),
         Radius.circular(style.cornerRadius),
       );
 
@@ -199,8 +455,7 @@ class BarChartPainter extends CustomPainter {
         isReversed ? Alignment.centerLeft : Alignment.centerRight,
       );
 
-      // Apply hover effect
-      if (_isBarHovered(i, chartArea, barHeight, spacing, isHorizontal: true)) {
+      if (_isRectHovered(rect.outerRect)) {
         _applyHoverEffect(
           canvas,
           rect,
@@ -215,16 +470,17 @@ class BarChartPainter extends CustomPainter {
 
       // Draw value labels (always horizontal)
       if (showValues) {
+        final isToRight = valueX > zeroX;
         _drawValueLabel(
           canvas,
           data[i].value,
           Offset(
-            isReversed ? barX - 4 : barX + barWidth + 4,
+            isToRight ? barLeft + barWidth + 4 : barLeft - 4,
             barY + barHeight / 2,
           ),
           data[i].color ?? style.barColor,
           isAbove: false,
-          isLeftAligned: isReversed,
+          isLeftAligned: !isToRight,
         );
       }
     }
@@ -320,17 +576,91 @@ class BarChartPainter extends CustomPainter {
     final textStyle =
         style.labelStyle ?? TextStyle(color: style.barColor, fontSize: 12);
 
-    if (isHorizontal) {
-      _drawHorizontalLabels(canvas, chartArea, textStyle);
+    if (style.groupByLabel) {
+      // Use grouped label drawing
+      if (isHorizontal) {
+        _drawGroupedHorizontalLabels(canvas, chartArea, textStyle);
+      } else {
+        _drawGroupedVerticalLabels(canvas, chartArea, textStyle);
+      }
     } else {
-      _drawVerticalLabels(canvas, chartArea, textStyle);
+      // Original label drawing logic
+      if (isHorizontal) {
+        _drawHorizontalLabels(canvas, chartArea, textStyle);
+      } else {
+        _drawVerticalLabels(canvas, chartArea, textStyle);
+      }
+    }
+  }
+
+  /// Draws labels for grouped vertical bars
+  void _drawGroupedVerticalLabels(Canvas canvas, Rect chartArea, TextStyle textStyle) {
+    final groups = _groupDataByLabel();
+    if (groups.isEmpty) return;
+    final isInverted = _isInverted();
+
+    final spacingRatio = _sanitizeSpacing(style.barSpacing);
+    final groupUnitWidth = chartArea.width / groups.length;
+    final groupWidth = groupUnitWidth * (1 - spacingRatio);
+    final groupSpacing = groupUnitWidth * spacingRatio;
+
+    for (int g = 0; g < groups.length; g++) {
+      final group = groups[g];
+      final groupX = chartArea.left + (g * (groupWidth + groupSpacing)) + (groupSpacing / 2);
+      final textSpan = TextSpan(text: group.key, style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      final yPosition = isInverted
+          ? chartArea.top - textPainter.height - 8
+          : chartArea.bottom + padding.bottom / 2 - textPainter.height / 2;
+
+      textPainter.paint(
+        canvas,
+        Offset(groupX + (groupWidth - textPainter.width) / 2, yPosition),
+      );
+    }
+  }
+
+  /// Draws labels for grouped horizontal bars
+  void _drawGroupedHorizontalLabels(Canvas canvas, Rect chartArea, TextStyle textStyle) {
+    final groups = _groupDataByLabel();
+    if (groups.isEmpty) return;
+    final isReversed = style.rotation >= 225 && style.rotation < 315;
+
+    final spacingRatio = _sanitizeSpacing(style.barSpacing);
+    final groupUnitHeight = chartArea.height / groups.length;
+    final groupHeight = groupUnitHeight * (1 - spacingRatio);
+    final groupSpacing = groupUnitHeight * spacingRatio;
+
+    for (int g = 0; g < groups.length; g++) {
+      final group = groups[g];
+      final groupY = chartArea.top + (g * (groupHeight + groupSpacing)) + (groupSpacing / 2);
+      final textSpan = TextSpan(text: group.key, style: textStyle);
+      final textPainter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      final xPosition = isReversed
+          ? chartArea.right + padding.right / 4
+          : chartArea.left - textPainter.width - padding.left / 4;
+
+      textPainter.paint(
+        canvas,
+        Offset(xPosition, groupY + (groupHeight - textPainter.height) / 2),
+      );
     }
   }
 
   /// Draws labels for vertical bars
   void _drawVerticalLabels(Canvas canvas, Rect chartArea, TextStyle textStyle) {
-    final barWidth = (chartArea.width / data.length) * (1 - style.barSpacing);
-    final spacing = (chartArea.width / data.length) * style.barSpacing;
+    final spacingRatio = _sanitizeSpacing(style.barSpacing);
+    final unitWidth = chartArea.width / data.length;
+    final barWidth = unitWidth * (1 - spacingRatio);
+    final spacing = unitWidth * spacingRatio;
     final isInverted = _isInverted();
 
     for (int i = 0; i < data.length; i++) {
@@ -358,8 +688,10 @@ class BarChartPainter extends CustomPainter {
     Rect chartArea,
     TextStyle textStyle,
   ) {
-    final barHeight = (chartArea.height / data.length) * (1 - style.barSpacing);
-    final spacing = (chartArea.height / data.length) * style.barSpacing;
+    final spacingRatio = _sanitizeSpacing(style.barSpacing);
+    final unitHeight = chartArea.height / data.length;
+    final barHeight = unitHeight * (1 - spacingRatio);
+    final spacing = unitHeight * spacingRatio;
     final isReversed = style.rotation >= 225 && style.rotation < 315;
 
     for (int i = 0; i < data.length; i++) {
@@ -381,29 +713,9 @@ class BarChartPainter extends CustomPainter {
     }
   }
 
-  /// Checks if a specific bar is being hovered over
-  bool _isBarHovered(
-    int barIndex,
-    Rect chartArea,
-    double barSize,
-    double spacing, {
-    required bool isHorizontal,
-  }) {
+  bool _isRectHovered(Rect rect) {
     if (hoverPosition == null) return false;
-
-    if (isHorizontal) {
-      // Check vertical position for horizontal bars
-      final barY =
-          chartArea.top + (barIndex * (barSize + spacing)) + (spacing / 2);
-      final barEndY = barY + barSize;
-      return hoverPosition!.dy >= barY && hoverPosition!.dy <= barEndY;
-    } else {
-      // Check horizontal position for vertical bars
-      final barX =
-          chartArea.left + (barIndex * (barSize + spacing)) + (spacing / 2);
-      final barEndX = barX + barSize;
-      return hoverPosition!.dx >= barX && hoverPosition!.dx <= barEndX;
-    }
+    return rect.contains(hoverPosition!);
   }
 
   @override
@@ -417,4 +729,16 @@ class BarChartPainter extends CustomPainter {
         oldDelegate.hoverPosition != hoverPosition ||
         oldDelegate.horizontalGridLines != horizontalGridLines;
   }
+}
+
+class _ValueRange {
+  final double lower;
+  final double upper;
+  final double span;
+
+  const _ValueRange({
+    required this.lower,
+    required this.upper,
+    required this.span,
+  });
 }

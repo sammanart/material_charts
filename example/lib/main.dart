@@ -63,7 +63,7 @@ Future<void> _exportChartToPdf(BuildContext context, GlobalKey repaintKey, Strin
   }
 }
 
-Widget _buildExportHeader(BuildContext context, String title, GlobalKey repaintKey, {VoidCallback? onExportSvg}) {
+Widget _buildExportHeader(BuildContext context, String title, GlobalKey repaintKey, {VoidCallback? onExportSvg, VoidCallback? onExportPdf}) {
   return Row(
     children: [
       Expanded(
@@ -81,7 +81,7 @@ Widget _buildExportHeader(BuildContext context, String title, GlobalKey repaintK
       IconButton(
         tooltip: 'Export PDF',
         icon: const Icon(Icons.picture_as_pdf),
-        onPressed: () => _exportChartToPdf(context, repaintKey, title),
+        onPressed: onExportPdf ?? () => _exportChartToPdf(context, repaintKey, title),
       ),
     ],
   );
@@ -162,6 +162,82 @@ Future<void> _exportPieChartSvg(
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('SVG export failed: $e')),
+    );
+  }
+}
+
+Future<void> _exportPopulationPyramidSvg(
+  BuildContext context,
+  List<PopulationPyramidData> data,
+  PopulationPyramidStyle style,
+  String title,
+) async {
+  try {
+    final svg = PopulationPyramidSvgExporter.exportSvg(
+      data: data,
+      style: style,
+      width: 600,
+      height: 500,
+      padding: const EdgeInsets.all(40),
+      options: PopulationPyramidSvgOptions(
+        title: title,
+      ),
+    );
+
+    final file = await _saveSvgToDocuments(svg, fileName: 'population_pyramid_${DateTime.now().millisecondsSinceEpoch}.svg');
+    if (!context.mounted) return;
+
+    await _showSvgPreviewDialog(context, svg, file);
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('SVG export failed: $e')),
+    );
+  }
+}
+
+Future<void> _exportPopulationPyramidPdf(
+  BuildContext context,
+  List<PopulationPyramidData> data,
+  PopulationPyramidStyle style,
+  String title,
+) async {
+  try {
+    final svg = PopulationPyramidSvgExporter.exportSvg(
+      data: data,
+      style: style,
+      width: 600,
+      height: 500,
+      padding: const EdgeInsets.all(40),
+      options: PopulationPyramidSvgOptions(
+        title: title,
+      ),
+    );
+
+    final doc = pw.Document();
+    
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context ctx) {
+          return pw.Center(
+            child: pw.Column(
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                pw.SizedBox(height: 12),
+                pw.SvgImage(svg: svg, fit: pw.BoxFit.contain),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (_) async => doc.save());
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('PDF export failed: $e')),
     );
   }
 }
@@ -392,7 +468,10 @@ class _ChartsDemoState extends State<ChartsDemo> {
   final List<Widget> _charts = [
     const LineChartExample(),
     BarChartExample(),
+    NegativeBarChartExample(),
+    GroupedBarChartExample(),
     PieChartExample(),
+    PopulationChartExample(),
     AreaChartExample(),
     const TreemapChartExample(),
     const MultiLineChartExample(),
@@ -406,7 +485,10 @@ class _ChartsDemoState extends State<ChartsDemo> {
   final List<String> _chartNames = [
     'Line Chart',
     'Bar Chart',
+    'Bar Chart (Negatives)',
+    'Grouped Bar Chart',
     'Pie Chart',
+    'Population Chart',
     'Area Chart',
     'Treemap Chart',
     'Multi-Line Chart',
@@ -496,6 +578,50 @@ class LineChartExample extends StatelessWidget {
   }
 }
 
+// Bar Chart Example with Negative Values
+class NegativeBarChartExample extends StatelessWidget {
+  NegativeBarChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    final data = [
+      const BarChartData(value: -12, label: 'Q1', color: Colors.red),
+      const BarChartData(value: 18, label: 'Q2', color: Colors.green),
+      const BarChartData(value: -6, label: 'Q3', color: Colors.orange),
+      const BarChartData(value: 24, label: 'Q4', color: Colors.blue),
+      const BarChartData(value: 1, label: 'Q5', color: Colors.grey),
+    ];
+
+    const style = BarChartStyle(
+      barSpacing: 0.2,
+      gradientEffect: false,
+    );
+
+    return Column(
+      children: [
+        _buildExportHeader(
+          context,
+          'Quarterly Performance (+/-)',
+          _chartKey,
+          onExportSvg: () => _exportBarChartSvg(context, data, style, 'Quarterly Performance (+/-)'),
+        ),
+        const SizedBox(height: 20),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialBarChart(
+            data: data,
+            width: 380,
+            height: 300,
+            style: style,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // Bar Chart Example
 class BarChartExample extends StatelessWidget {
   BarChartExample({super.key});
@@ -521,8 +647,8 @@ class BarChartExample extends StatelessWidget {
     return Column(
       children: [
         _buildExportHeader(
-          context, 
-          'Product Sales Comparison', 
+          context,
+          'Product Sales Comparison',
           _chartKey,
           onExportSvg: () => _exportBarChartSvg(context, data, style, 'Product Sales Comparison'),
         ),
@@ -536,7 +662,59 @@ class BarChartExample extends StatelessWidget {
             style: style,
           ),
         ),
-      
+      ],
+    );
+  }
+}
+
+// Grouped Bar Chart Example
+class GroupedBarChartExample extends StatelessWidget {
+  GroupedBarChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    // Multiple data series with the same labels, grouped by quarter
+    final data = [
+      // Q1 Sales
+      const BarChartData(value: 20, label: 'Q1', color: Colors.blue),
+      const BarChartData(value: 25, label: 'Q1', color: Colors.red),
+      const BarChartData(value: 18, label: 'Q1', color: Colors.green),
+      // Q2 Sales
+      const BarChartData(value: 30, label: 'Q2', color: Colors.blue),
+      const BarChartData(value: 35, label: 'Q2', color: Colors.red),
+      const BarChartData(value: 28, label: 'Q2', color: Colors.green),
+      // Q3 Sales
+      const BarChartData(value: 40, label: 'Q3', color: Colors.blue),
+      const BarChartData(value: 38, label: 'Q3', color: Colors.red),
+      const BarChartData(value: 32, label: 'Q3', color: Colors.green),
+    ];
+
+    const style = BarChartStyle(
+      barSpacing: 0.1,
+      groupByLabel: true, // Enable grouping by label
+      gradientEffect: false,
+    );
+
+    return Column(
+      children: [
+        _buildExportHeader(
+          context,
+          'Quarterly Sales by Division (Grouped)',
+          _chartKey,
+          onExportSvg: () => _exportBarChartSvg(context, data, style, 'Quarterly Sales'),
+        ),
+        const SizedBox(height: 20),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialBarChart(
+            data: data,
+            width: 400,
+            height: 300,
+            style: style,
+          ),
+        ),
       ],
     );
   }
@@ -558,7 +736,10 @@ class PieChartExample extends StatelessWidget {
       const PieChartData(value: 10, label: 'Other', color: Colors.purple),
     ];
 
-    const style = PieChartStyle(holeRadius: 0.5,backgroundColor: Colors.transparent,
+    const style = PieChartStyle(
+      chartAlignment: ChartAlignment.topLeft,
+      holeRadius: 0.5,
+      backgroundColor: Colors.transparent,
       showLegend: true,
       legendPosition: PieChartLegendPosition.bottom,
     );
@@ -566,8 +747,8 @@ class PieChartExample extends StatelessWidget {
     return Column(
       children: [
         _buildExportHeader(
-          context, 
-          'Device Usage Distribution', 
+          context,
+          'Device Usage Distribution',
           _chartKey,
           onExportSvg: () => _exportPieChartSvg(context, data, style, 'Device Usage Distribution'),
         ),
@@ -579,6 +760,172 @@ class PieChartExample extends StatelessWidget {
             width: 350,
             height: 300,
             style: style,
+          )
+        ),
+      ],
+    );
+  }
+}
+
+// Population Pyramid Example
+class PopulationChartExample extends StatelessWidget {
+  PopulationChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    final data = [
+      const PopulationPyramidData(
+        ageGroup: '80+',
+        leftPopulation: 800000,
+        rightPopulation: 1100000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '75-79',
+        leftPopulation: 1100000,
+        rightPopulation: 1300000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '70-74',
+        leftPopulation: 1700000,
+        rightPopulation: 1900000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '65-69',
+        leftPopulation: 2400000,
+        rightPopulation: 2600000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '60-64',
+        leftPopulation: 3200000,
+        rightPopulation: 3400000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '55-59',
+        leftPopulation: 4100000,
+        rightPopulation: 4200000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '50-54',
+        leftPopulation: 4900000,
+        rightPopulation: 5000000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '45-49',
+        leftPopulation: 5600000,
+        rightPopulation: 5500000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '40-44',
+        leftPopulation: 6200000,
+        rightPopulation: 6100000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '35-39',
+        leftPopulation: 6900000,
+        rightPopulation: 6800000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '30-34',
+        leftPopulation: 7400000,
+        rightPopulation: 7200000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '25-29',
+        leftPopulation: 7800000,
+        rightPopulation: 7500000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '20-24',
+        leftPopulation: 7500000,
+        rightPopulation: 7200000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '15-19',
+        leftPopulation: 7100000,
+        rightPopulation: 6800000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '10-14',
+        leftPopulation: 6800000,
+        rightPopulation: 6500000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '5-9',
+        leftPopulation: 6500000,
+        rightPopulation: 6200000,
+      ),
+      const PopulationPyramidData(
+        ageGroup: '0-4',
+        leftPopulation: 6200000,
+        rightPopulation: 5900000,
+      ),
+    ];
+
+    const style = PopulationPyramidStyle(
+      backgroundColor: Colors.transparent,
+      leftColor: Color(0xFF4A90E2),
+      rightColor: Color(0xFFED6D91),
+      labelColor: Colors.black87,
+      valueColor: Colors.black54,
+      labelFontSize: 11.0,
+      valueFontSize: 9.0,
+      labelFontWeight: FontWeight.w600,
+      valueFontWeight: FontWeight.w400,
+      showGridLines: false,
+      gridLineColor: Colors.grey,
+      gridLineWidth: 0.5,
+      verticalGridLines: 4,
+      horizontalGridLines: 0,
+      showLegend: true,
+      showValues: true,
+      showPercentage: true,
+      centerGap: 40.0,
+      legendPosition: PyramidLegendPosition.bottomCenter,
+      legendGapFromChart: 0.0,
+      barValueGap: 12.0,
+      legendItemSpacing: 50.0,
+      legendSquareSize: 14.0,
+      showLegendSquares: true,
+      legendLeftLabel: 'Group A',
+      legendRightLabel: 'Group B',
+      legendTextStyle: TextStyle(
+        fontSize: 12.0,
+        fontWeight: FontWeight.w500,
+        color: Colors.black87,
+      ),
+    );
+
+    return Column(
+      children: [
+        _buildExportHeader(
+          context,
+          'USA Population Pyramid',
+          _chartKey,
+          onExportSvg: () => _exportPopulationPyramidSvg(
+            context,
+            data,
+            style,
+            'USA Population Pyramid',
+          ),
+          onExportPdf: () => _exportPopulationPyramidPdf(
+            context,
+            data,
+            style,
+            'USA Population Pyramid',
+          ),
+        ),
+        const SizedBox(height: 20),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialPopulationPyramid(
+            data: data,
+            width: 600,
+            animationDuration: Duration(milliseconds: 1000),
+            height: 500,
+            style: style,
+            padding: const EdgeInsets.all(40.0),
           ),
         ),
       ],
@@ -695,12 +1042,12 @@ class AreaChartExample extends StatelessWidget {
         verticalOffset: 18,
       ),
       crosshair: AreaCrosshairConfig(
-        enabled: true,
-        labelStyle: TextStyle(
-          fontWeight: FontWeight.bold,
-          backgroundColor: Colors.grey,
-          color: Colors.white,
-        )),
+          enabled: true,
+          labelStyle: TextStyle(
+            fontWeight: FontWeight.bold,
+            backgroundColor: Colors.grey,
+            color: Colors.white,
+          )),
       showKeyEventMarkers: true,
       tooltipStyle: TooltipStyleConfig(
         backgroundColor: Colors.white,
@@ -721,8 +1068,8 @@ class AreaChartExample extends StatelessWidget {
     return Column(
       children: [
         _buildExportHeader(
-          context, 
-          'Quarterly Revenue Trend with Key Events', 
+          context,
+          'Quarterly Revenue Trend with Key Events',
           _chartKey,
           onExportSvg: () => _exportAreaChartSvg(context, series, style, 'Quarterly Revenue Trend'),
         ),
@@ -1433,30 +1780,28 @@ class _HybridChartExampleState extends State<HybridChartExample> {
           child: RepaintBoundary(
             key: _chartKey,
             child: MaterialHybridChart(
-
-            showChartTypeToggle: _showChartTypeToggle,
-            series: hybridSeries,
-            width: _chartWidth,
-            height: _chartHeight,
-            initialChartType: _chartType,
-            enablePointDrag: true,
-            enableHoverPointScale: true,
-            showPointTooltipOnHover: _showPointTooltipOnHover,
-            showDragTooltip: _showDragTooltip,
-
-            onPointValueChange: (seriesIndex, pointIndex, newValue) {
-              if (seriesIndex != 0) return;
-              if (pointIndex < 0 || pointIndex >= _hybridData.length) return;
-              _updateHybridPointField(pointIndex, HybridCandlestickValueType.close, newValue);
-            },
-            onCandlestickValueChange: (seriesIndex, pointIndex, valueType, newValue) {
-              if (seriesIndex != 0) return;
-              if (pointIndex < 0 || pointIndex >= _hybridData.length) return;
-              _updateHybridPointField(pointIndex, valueType, newValue);
-            },
-            axisConfig: axisConfig,
-            style: style,
-          ),
+              showChartTypeToggle: _showChartTypeToggle,
+              series: hybridSeries,
+              width: _chartWidth,
+              height: _chartHeight,
+              initialChartType: _chartType,
+              enablePointDrag: true,
+              enableHoverPointScale: true,
+              showPointTooltipOnHover: _showPointTooltipOnHover,
+              showDragTooltip: _showDragTooltip,
+              onPointValueChange: (seriesIndex, pointIndex, newValue) {
+                if (seriesIndex != 0) return;
+                if (pointIndex < 0 || pointIndex >= _hybridData.length) return;
+                _updateHybridPointField(pointIndex, HybridCandlestickValueType.close, newValue);
+              },
+              onCandlestickValueChange: (seriesIndex, pointIndex, valueType, newValue) {
+                if (seriesIndex != 0) return;
+                if (pointIndex < 0 || pointIndex >= _hybridData.length) return;
+                _updateHybridPointField(pointIndex, valueType, newValue);
+              },
+              axisConfig: axisConfig,
+              style: style,
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -1607,7 +1952,7 @@ class _HybridChartExampleState extends State<HybridChartExample> {
       _chartType = HybridChartType.candlestick;
       _chartWidth = 800;
       _chartHeight = 400;
-      
+
       _showPoints = true;
       _pointSize = 6.0;
 

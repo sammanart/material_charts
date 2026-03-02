@@ -127,25 +127,77 @@ class BarChartSvgExporter {
     return items.join('\n');
   }
   
+  static _ValueRange _resolveValueRange(List<BarChartData> data) {
+    final minValue = data.map((d) => d.value).reduce(min);
+    final maxValue = data.map((d) => d.value).reduce(max);
+
+    double lower = min(minValue, 0.0);
+    double upper = max(maxValue, 0.0);
+
+    if (lower == upper) {
+      if (upper == 0.0) {
+        upper = 1.0;
+      } else if (upper > 0) {
+        lower = 0.0;
+      } else {
+        upper = 0.0;
+      }
+    }
+
+    final span = upper - lower;
+    return _ValueRange(lower: lower, upper: upper, span: span <= 0 ? 1.0 : span);
+  }
+
+  static double _valueToVerticalY(
+    double value,
+    Rect area,
+    _ValueRange range,
+    bool isInverted,
+  ) {
+    final normalized = (value - range.lower) / range.span;
+    if (isInverted) {
+      return area.top + (normalized * area.height);
+    }
+    return area.bottom - (normalized * area.height);
+  }
+
+  static double _valueToHorizontalX(
+    double value,
+    Rect area,
+    _ValueRange range,
+    bool isReversed,
+  ) {
+    final normalized = (value - range.lower) / range.span;
+    if (isReversed) {
+      return area.right - (normalized * area.width);
+    }
+    return area.left + (normalized * area.width);
+  }
+
   static String _drawBars(Rect area, List<BarChartData> data, BarChartStyle style, bool isHorizontal, StringBuffer defs) {
+    if (data.isEmpty) return '';
+    final range = _resolveValueRange(data);
     if (isHorizontal) {
-      return _drawHorizontalBars(area, data, style, defs);
+      return _drawHorizontalBars(area, data, style, defs, range);
     } else {
-      return _drawVerticalBars(area, data, style, defs);
+      return _drawVerticalBars(area, data, style, defs, range);
     }
   }
   
-  static String _drawVerticalBars(Rect area, List<BarChartData> data, BarChartStyle style, StringBuffer defs) {
+  static String _drawVerticalBars(Rect area, List<BarChartData> data, BarChartStyle style, StringBuffer defs, _ValueRange range) {
     final items = <String>[];
-    final maxValue = data.map((d) => d.value).reduce(max);
-    final barWidth = (area.width / data.length) * (1 - style.barSpacing);
-    final spacing = (area.width / data.length) * style.barSpacing;
+    final spacingRatio = style.barSpacing.clamp(0.0, 0.95);
+    final unitWidth = area.width / data.length;
+    final barWidth = unitWidth * (1 - spacingRatio);
+    final spacing = unitWidth * spacingRatio;
     final isInverted = _isInverted(style.rotation);
+    final zeroY = _valueToVerticalY(0, area, range, isInverted);
     
     for (int i = 0; i < data.length; i++) {
-      final barHeight = (data[i].value / maxValue) * area.height;
+      final valueY = _valueToVerticalY(data[i].value, area, range, isInverted);
+      final fullHeight = (valueY - zeroY).abs();
+      final barTop = valueY < zeroY ? zeroY - fullHeight : zeroY;
       final barX = area.left + (i * (barWidth + spacing)) + (spacing / 2);
-      final barY = isInverted ? area.top : area.bottom - barHeight;
       
       String fill;
       if (data[i].color != null) {
@@ -163,7 +215,7 @@ class BarChartSvgExporter {
         fill = _colorToRgba(style.barColor);
       }
       
-      items.add(_rect(barX, barY, barWidth, barHeight, 
+      items.add(_rect(barX, barTop, barWidth, fullHeight, 
         fill: fill, 
         rx: style.cornerRadius, 
         ry: style.cornerRadius));
@@ -172,17 +224,20 @@ class BarChartSvgExporter {
     return items.join('\n');
   }
   
-  static String _drawHorizontalBars(Rect area, List<BarChartData> data, BarChartStyle style, StringBuffer defs) {
+  static String _drawHorizontalBars(Rect area, List<BarChartData> data, BarChartStyle style, StringBuffer defs, _ValueRange range) {
     final items = <String>[];
-    final maxValue = data.map((d) => d.value).reduce(max);
-    final barHeight = (area.height / data.length) * (1 - style.barSpacing);
-    final spacing = (area.height / data.length) * style.barSpacing;
+    final spacingRatio = style.barSpacing.clamp(0.0, 0.95);
+    final unitHeight = area.height / data.length;
+    final barHeight = unitHeight * (1 - spacingRatio);
+    final spacing = unitHeight * spacingRatio;
     final isReversed = _isReversed(style.rotation);
+    final zeroX = _valueToHorizontalX(0, area, range, isReversed);
     
     for (int i = 0; i < data.length; i++) {
-      final barWidth = (data[i].value / maxValue) * area.width;
+      final valueX = _valueToHorizontalX(data[i].value, area, range, isReversed);
+      final fullWidth = (valueX - zeroX).abs();
+      final barLeft = valueX < zeroX ? zeroX - fullWidth : zeroX;
       final barY = area.top + (i * (barHeight + spacing)) + (spacing / 2);
-      final barX = isReversed ? area.right - barWidth : area.left;
       
       String fill;
       if (data[i].color != null) {
@@ -200,7 +255,7 @@ class BarChartSvgExporter {
         fill = _colorToRgba(style.barColor);
       }
       
-      items.add(_rect(barX, barY, barWidth, barHeight, 
+      items.add(_rect(barLeft, barY, fullWidth, barHeight, 
         fill: fill, 
         rx: style.cornerRadius, 
         ry: style.cornerRadius));
@@ -244,39 +299,52 @@ class BarChartSvgExporter {
   
   static String _drawValues(Rect area, List<BarChartData> data, BarChartStyle style, bool isHorizontal) {
     final items = <String>[];
-    final maxValue = data.map((d) => d.value).reduce(max);
-    final color = data.first.color ?? style.barColor;
-    final textStyle = style.valueStyle ?? TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold);
+    final range = _resolveValueRange(data);
+    final baseTextStyle = style.valueStyle ?? const TextStyle(fontSize: 12, fontWeight: FontWeight.bold);
     
     if (isHorizontal) {
-      final barHeight = (area.height / data.length) * (1 - style.barSpacing);
-      final spacing = (area.height / data.length) * style.barSpacing;
+      final spacingRatio = style.barSpacing.clamp(0.0, 0.95);
+      final unitHeight = area.height / data.length;
+      final barHeight = unitHeight * (1 - spacingRatio);
+      final spacing = unitHeight * spacingRatio;
       final isReversed = _isReversed(style.rotation);
+      final zeroX = _valueToHorizontalX(0, area, range, isReversed);
       
       for (int i = 0; i < data.length; i++) {
-        final barWidth = (data[i].value / maxValue) * area.width;
+        final barColor = data[i].color ?? style.barColor;
+        final textStyle = baseTextStyle.copyWith(color: barColor);
+        final valueX = _valueToHorizontalX(data[i].value, area, range, isReversed);
+        final fullWidth = (valueX - zeroX).abs();
+        final barLeft = valueX < zeroX ? zeroX - fullWidth : zeroX;
         final y = area.top + (i * (barHeight + spacing)) + (spacing / 2) + barHeight / 2;
-        final barX = isReversed ? area.right - barWidth : area.left;
-        final x = isReversed ? barX - 4 : barX + barWidth + 4;
+        final isToRight = valueX > zeroX;
+        final x = isToRight ? barLeft + fullWidth + 4 : barLeft - 4;
         final valueText = data[i].value.toStringAsFixed(1);
         items.add(_text(valueText, x, y, textStyle, 
-          anchor: isReversed ? 'end' : 'start', 
+          anchor: isToRight ? 'start' : 'end', 
           dominantBaseline: 'middle'));
       }
     } else {
-      final barWidth = (area.width / data.length) * (1 - style.barSpacing);
-      final spacing = (area.width / data.length) * style.barSpacing;
+      final spacingRatio = style.barSpacing.clamp(0.0, 0.95);
+      final unitWidth = area.width / data.length;
+      final barWidth = unitWidth * (1 - spacingRatio);
+      final spacing = unitWidth * spacingRatio;
       final isInverted = _isInverted(style.rotation);
+      final zeroY = _valueToVerticalY(0, area, range, isInverted);
       
       for (int i = 0; i < data.length; i++) {
-        final barHeight = (data[i].value / maxValue) * area.height;
+        final barColor = data[i].color ?? style.barColor;
+        final textStyle = baseTextStyle.copyWith(color: barColor);
+        final valueY = _valueToVerticalY(data[i].value, area, range, isInverted);
+        final fullHeight = (valueY - zeroY).abs();
+        final barTop = valueY < zeroY ? zeroY - fullHeight : zeroY;
         final x = area.left + (i * (barWidth + spacing)) + (spacing / 2) + barWidth / 2;
-        final barY = isInverted ? area.top : area.bottom - barHeight;
-        final y = isInverted ? barY + barHeight + 12 : barY - 4;
+        final isUpward = valueY < zeroY;
+        final y = isUpward ? barTop - 4 : barTop + fullHeight + 4;
         final valueText = data[i].value.toStringAsFixed(1);
         items.add(_text(valueText, x, y, textStyle, 
           anchor: 'middle', 
-          dominantBaseline: isInverted ? 'hanging' : 'auto'));
+          dominantBaseline: isUpward ? 'auto' : 'hanging'));
       }
     }
     
@@ -329,4 +397,16 @@ class BarChartSvgExporter {
   static double _colorOpacity(Color color) {
     return color.alpha / 255.0;
   }
+}
+
+class _ValueRange {
+  final double lower;
+  final double upper;
+  final double span;
+
+  const _ValueRange({
+    required this.lower,
+    required this.upper,
+    required this.span,
+  });
 }

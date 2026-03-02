@@ -1,5 +1,6 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
 
 /// Represents a data point for a bar chart.
 ///
@@ -130,6 +131,17 @@ class BarChartStyle {
   /// This is Plotly-compatible. 'h' automatically sets rotation to 90 degrees.
   final String orientation;
 
+  /// When true, bars with the same label are grouped together.
+  /// Each bar in the group is displayed side by side with different colors.
+  /// This is useful for comparing multiple data series across the same categories.
+  ///
+  /// Example: If you have quarterly sales data for multiple divisions (Q1, Q1, Q1, Q2, Q2, Q2, Q3, Q3, Q3),
+  /// with groupByLabel enabled, the bars will be grouped by quarter, with each division's bar
+  /// displayed next to each other vertically (or horizontally for rotated charts).
+  ///
+  /// Each bar in a group needs its own color specified in the BarChartData.color field.
+  final bool groupByLabel;
+
   /// Creates an instance of [BarChartStyle] with customizable properties.
   ///
   /// The following parameters can be customized:
@@ -146,6 +158,7 @@ class BarChartStyle {
   /// - [gradientColors]: List of colors for the gradient effect.
   /// - [rotation]: Rotation angle in degrees (default is 0).
   /// - [orientation]: Chart orientation 'v' or 'h' (default is 'v').
+  /// - [groupByLabel]: Group bars by label so same labels have bars side by side (default is false).
   const BarChartStyle({
     this.barColor = Colors.blue,
     this.gridColor = Colors.grey,
@@ -160,6 +173,7 @@ class BarChartStyle {
     this.gradientColors,
     this.rotation = 0.0,
     this.orientation = 'v',
+    this.groupByLabel = false,
   });
 
   /// Creates a [BarChartStyle] instance from a JSON map.
@@ -234,6 +248,7 @@ class BarChartStyle {
                   : null,
       rotation: rotation,
       orientation: orientation,
+      groupByLabel: json['groupByLabel'] ?? false,
     );
   }
 
@@ -251,6 +266,7 @@ class BarChartStyle {
       'gradientEffect': gradientEffect,
       'rotation': rotation,
       'orientation': orientation,
+      'groupByLabel': groupByLabel,
       if (gradientColors != null)
         'gradientColors':
             gradientColors!.map((c) => BarChartData.colorToHex(c)).toList(),
