@@ -310,6 +310,13 @@ class _MaterialPieChartState extends State<MaterialPieChart>
           ? (_) => setState(() => _hoveredSegmentIndex = null)
           : null,
       child: InkWell(
+        // Prevent InkWell from drawing any hover/highlight overlay
+        // so the background/box color doesn't change when hovering
+        // over the widget area (but keep tap handling).
+        overlayColor: MaterialStateProperty.all(Colors.transparent),
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        hoverColor: Colors.transparent,
         onTapUp: widget.interactive
             ? (event) {
                 // Get the index of the currently hovered segment based on mouse position.

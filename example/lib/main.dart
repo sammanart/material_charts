@@ -215,7 +215,7 @@ Future<void> _exportPopulationPyramidPdf(
     );
 
     final doc = pw.Document();
-    
+
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
@@ -615,6 +615,7 @@ class NegativeBarChartExample extends StatelessWidget {
             width: 380,
             height: 300,
             style: style,
+            showTooltip: true,
           ),
         ),
       ],
@@ -660,6 +661,7 @@ class BarChartExample extends StatelessWidget {
             width: 350,
             height: 300,
             style: style,
+            showTooltip: true,
           ),
         ),
       ],
@@ -713,6 +715,7 @@ class GroupedBarChartExample extends StatelessWidget {
             width: 400,
             height: 300,
             style: style,
+            showTooltip: true,
           ),
         ),
       ],
@@ -754,14 +757,13 @@ class PieChartExample extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         RepaintBoundary(
-          key: _chartKey,
-          child: MaterialPieChart(
-            data: data,
-            width: 350,
-            height: 300,
-            style: style,
-          )
-        ),
+            key: _chartKey,
+            child: MaterialPieChart(
+              data: data,
+              width: 350,
+              height: 300,
+              style: style,
+            )),
       ],
     );
   }
@@ -1293,23 +1295,45 @@ class HollowSemiCircleExample extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        const Text(
-          'Goal Achievement',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 20),
+        // const Text(
+        //   'Goal Achievement',
+        //   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        // ),
+        // const SizedBox(height: 20),
         MaterialChartHollowSemiCircle(
           percentage: 75,
           size: 200,
-          hollowRadius: 0.6,
-          style: const ChartStyle(
+          hollowRadius: 0.2,
+          style: ChartStyle(
             activeColor: Colors.green,
+            activeColors: const [Colors.green, Colors.yellow, Colors.red],
+            activePercentages: const [30, 25, 20],
+            activeLabels: const ['Completed', 'In Review', 'Blocked'],
             inactiveColor: Colors.grey,
+            showLegend: true, legendSpacing: 50,
+            percentagePosition: PercentagePosition.top,
+            percentageOffset: 0.0,
+            percentageFormatter: (value) {
+              return '${value.toStringAsFixed(0)}%'; // Default formatting function, is there if we don't put anything in that parameter
+            },
+            // Examples of other functions we could use:
+            // Simple integer percent:
+            // (p) => '${p.toStringAsFixed(0)}%'
+            // One decimal:
+            // (p) => '${p.toStringAsFixed(1)}%'
+            // Custom label:
+            // (p) => 'Progress: ${p.toStringAsFixed(0)}%'
+            // Show fraction + percent:
+            // (p) {
+            //   final total = 100.0;
+            //   final done = (p / 100 * total).round();
+            //   return '$done/$total (${p.toStringAsFixed(0)}%)';
+            // }
             showPercentageText: true,
           ),
         ),
-        const SizedBox(height: 20),
-        const Text('75% Complete'),
+        // const SizedBox(height: 20),
+        // const Text('75% Complete'),
       ],
     );
   }
@@ -1361,8 +1385,9 @@ class GanttChartExample extends StatelessWidget {
         const SizedBox(height: 20),
         MaterialGanttChart(
           data: data,
-          width: 350,
-          height: 300,
+          width: 600,
+          height: 500,
+          style: GanttChartStyle(),
         ),
       ],
     );

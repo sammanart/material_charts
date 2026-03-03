@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'painter.dart';
+
 import 'models.dart';
+import 'painter.dart';
 
 /// A material design hollow semi-circle chart widget that displays a
 /// percentage value visually as a hollow semi-circle with optional legend and
@@ -22,7 +23,7 @@ class MaterialChartHollowSemiCircle extends BaseChart {
     super.style, // Optional style configuration for the chart
     super.onAnimationComplete, // Optional callback when animation completes
   }) : assert(
-          hollowRadius > 0 && hollowRadius < 1,
+          hollowRadius >= 0 && hollowRadius < 1,
           'Hollow radius must be between 0 and 1',
         );
 
@@ -105,6 +106,7 @@ class MaterialChartHollowSemiCircle extends BaseChart {
     Duration animationDuration = const Duration(milliseconds: 1500),
     Curve animationCurve = Curves.easeInOut,
     VoidCallback? onAnimationComplete,
+    double legendSpacing = 24.0,
   }) {
     return MaterialChartHollowSemiCircle(
       percentage: percentage,
@@ -118,6 +120,7 @@ class MaterialChartHollowSemiCircle extends BaseChart {
         animationCurve: animationCurve,
         showPercentageText: showPercentageText,
         showLegend: showLegend,
+        legendSpacing: legendSpacing,
       ),
       onAnimationComplete: onAnimationComplete,
     );
@@ -219,96 +222,147 @@ class _MaterialChartHollowSemiCircleState
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min, // Minimize the space taken by the column
-      children: [
-        // Display the legend if the style allows it
-        if (widget.style.showLegend) ...[
-          Padding(
-            padding: const EdgeInsets.only(
-              bottom: 24,
-            ), // Add spacing below the legend
-            child: Row(
-              mainAxisAlignment:
-                  MainAxisAlignment.center, // Center align the legend items
-              children: [
+    // Build legend content (rows of _LegendItem). We create the content
+    // regardless of placement and wrap it with appropriate padding when
+    // placing it around the chart.
+    final Widget legendContent = widget.style.showLegend
+        ? Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (widget.style.activePercentages != null &&
+                  widget.style.activePercentages!.isNotEmpty) ...[
+                for (var i = 0; i < widget.style.activePercentages!.length; i++) ...[
+                  _LegendItem(
+                    color: (widget.style.activeColors != null && i < widget.style.activeColors!.length)
+                        ? widget.style.activeColors![i]
+                        : widget.style.activeColor,
+                    label: _formatLegendLabel(
+                      widget.style.activeLabels != null && i < widget.style.activeLabels!.length
+                          ? widget.style.activeLabels![i]
+                          : 'Segment ${i + 1}',
+                      widget.style.activePercentages![i],
+                    ),
+                    style: widget.style.legendStyle,
+                  ),
+                  if (i != widget.style.activePercentages!.length - 1)
+                    const SizedBox(width: 16),
+                ],
+                const SizedBox(width: 24),
                 _LegendItem(
-                  color: widget
-                      .style.activeColor, // Color for the active legend item
-                  label: _formatLegendLabel(
-                    'Active',
-                    widget.percentage,
-                  ), // Label for active
-                  style: widget.style.legendStyle, // Custom style for legend
+                  color: widget.style.inactiveColor,
+                  label: _formatLegendLabel('Remaining',
+                      100 - widget.style.activePercentages!.fold(0.0, (a, b) => a + b)),
+                  style: widget.style.legendStyle,
                 ),
-                const SizedBox(width: 24), // Space between legend items
+              ] else ...[
                 _LegendItem(
-                  color: widget.style
-                      .inactiveColor, // Color for the inactive legend item
-                  label: _formatLegendLabel(
-                    'Inactive',
-                    100 - widget.percentage,
-                  ), // Label for inactive
-                  style: widget.style.legendStyle, // Custom style for legend
+                  color: widget.style.activeColor,
+                  label: _formatLegendLabel('Active', widget.percentage),
+                  style: widget.style.legendStyle,
+                ),
+                const SizedBox(width: 24),
+                _LegendItem(
+                  color: widget.style.inactiveColor,
+                  label: _formatLegendLabel('Inactive', 100 - widget.percentage),
+                  style: widget.style.legendStyle,
                 ),
               ],
-            ),
-          ),
-        ],
-        // Create a SizedBox to define the size of the chart
-        SizedBox(
-          width: widget.size, // Width of the chart
-          height: widget.size / 2, // Height of the chart (half the width)
-          child: AnimatedBuilder(
-            animation:
-                _animation, // Animate the chart based on the animation value
-            builder: (context, child) {
-              return Stack(
-                alignment:
-                    Alignment.center, // Center the child elements in the stack
-                children: [
-                  CustomPaint(
-                    size: Size(
-                      widget.size,
-                      widget.size / 2,
-                    ), // Size of the custom paint area
-                    painter: HollowSemiCircleChart(
-                      percentage:
-                          _animation.value, // Current percentage to paint
-                      activeColor: widget
-                          .style.activeColor, // Active color for the chart
-                      inactiveColor: widget
-                          .style.inactiveColor, // Inactive color for the chart
-                      hollowRadius: widget.hollowRadius, // Hollow radius ratio
-                    ),
-                  ),
-                  // Show percentage text if enabled in the style
-                  if (widget.style.showPercentageText)
-                    Positioned(
-                      bottom: 0, // Position at the bottom of the stack
-                      child: Text(
-                        _formatPercentage(
-                          _animation.value,
-                        ), // Format the percentage text
-                        style: widget.style.percentageStyle?.copyWith(
-                              color: widget.style
-                                  .textColor, // Apply custom text color if specified
-                            ) ??
-                            TextStyle(
-                              fontSize: widget.size / 8, // Default font size
-                              fontWeight: FontWeight.bold, // Bold font weight
-                              color: widget.style
-                                  .textColor, // Use custom text color if provided
-                            ),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-        ),
-      ],
+            ],
+          )
+        : const SizedBox.shrink();
+
+    // The chart widget (kept as before)
+    final Widget chartWidget = SizedBox(
+      width: widget.size,
+      height: widget.size / 2,
+      child: AnimatedBuilder(
+        animation: _animation,
+        builder: (context, child) {
+          return Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
+                size: Size(widget.size, widget.size / 2),
+                painter: HollowSemiCircleChart(
+                  percentage: _animation.value,
+                  activeColor: widget.style.activeColor,
+                  activeColors: widget.style.activeColors ?? [],
+                  inactiveColor: widget.style.inactiveColor,
+                  hollowRadius: widget.hollowRadius,
+                ),
+              ),
+              if (widget.style.showPercentageText)
+                (() {
+                  final pos = widget.style.percentagePosition;
+                  final offset = widget.style.percentageOffset;
+                  final fontSize = widget.size / 8;
+                  final baseDistance = fontSize * 2.0;
+                  final text = Text(
+                    _formatPercentage(_animation.value),
+                    style: widget.style.percentageStyle?.copyWith(
+                          color: widget.style.textColor,
+                        ) ??
+                        TextStyle(
+                          fontSize: fontSize,
+                          fontWeight: FontWeight.bold,
+                          color: widget.style.textColor,
+                        ),
+                  );
+
+                  if (pos == PercentagePosition.center) {
+                    return Positioned(bottom: 0, left: 0, right: 0, child: Center(child: text));
+                  }
+
+                  final verticalCenterTop = (widget.size / 2 - fontSize) / 2;
+
+                  switch (pos) {
+                    case PercentagePosition.top:
+                      return Positioned(top: -baseDistance - offset, left: 0, right: 0, child: Center(child: text));
+                    case PercentagePosition.bottom:
+                      return Positioned(bottom: -baseDistance - offset, left: 0, right: 0, child: Center(child: text));
+                    case PercentagePosition.left:
+                      return Positioned(left: -baseDistance - offset, top: verticalCenterTop, child: text);
+                    case PercentagePosition.right:
+                      return Positioned(right: -baseDistance - offset, top: verticalCenterTop, child: text);
+                    default:
+                      return Positioned(bottom: 0, left: 0, right: 0, child: Center(child: text));
+                  }
+                }()),
+            ],
+          );
+        },
+      ),
     );
+
+    // Place legend relative to the chart according to `legendPosition`.
+    switch (widget.style.semiCircleLegendPosition) {
+      case SemiCircleLegendPosition.top:
+        return Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(padding: EdgeInsets.only(bottom: widget.style.legendSpacing), child: legendContent),
+          chartWidget,
+        ]);
+      case SemiCircleLegendPosition.bottom:
+        return Column(mainAxisSize: MainAxisSize.min, children: [
+          chartWidget,
+          Padding(padding: EdgeInsets.only(top: widget.style.legendSpacing), child: legendContent),
+        ]);
+      case SemiCircleLegendPosition.left:
+        return Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+          Padding(padding: EdgeInsets.only(right: widget.style.legendSpacing), child: legendContent),
+          chartWidget,
+        ]);
+      case SemiCircleLegendPosition.right:
+        return Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+          chartWidget,
+          Padding(padding: EdgeInsets.only(left: widget.style.legendSpacing), child: legendContent),
+        ]);
+      default:
+        return Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(padding: EdgeInsets.only(bottom: widget.style.legendSpacing), child: legendContent),
+          chartWidget,
+        ]);
+    }
   }
 }
 

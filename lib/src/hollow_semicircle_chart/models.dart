@@ -1,11 +1,83 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
+
+// Position options for the percentage text shown on the chart.
+// Use the `PercentagePosition` enum for type-safety.
+//
+// - `PercentagePosition.center`: legacy placement (where the label was before)
+// - `PercentagePosition.top`: positioned above the semicircle
+// - `PercentagePosition.bottom`: positioned below the semicircle
+// - `PercentagePosition.left`: positioned to the left of the semicircle
+// - `PercentagePosition.right`: positioned to the right of the semicircle
+// ignore: public_member_api_docs
+enum PercentagePosition { center, top, bottom, left, right }
+
+// Position options for the legend placement relative to the chart.
+// - `SemiCircleLegendPosition.top`: legend above the chart
+// - `SemiCircleLegendPosition.bottom`: legend below the chart
+// - `SemiCircleLegendPosition.left`: legend to the left of the chart
+// - `SemiCircleLegendPosition.right`: legend to the right of the chart
+enum SemiCircleLegendPosition { top, bottom, left, right }
 
 /// Specifies the style configuration for chart widgets.
 /// This class allows customization of the appearance and behavior of the charts.
 class ChartStyle {
+  /// Position options for the percentage text shown on the chart.
+  /// Use the `PercentagePosition` enum for type-safety.
+  ///
+  /// - `PercentagePosition.center`: legacy placement (where the label was before)
+  /// - `PercentagePosition.top`: positioned above the semicircle
+  /// - `PercentagePosition.bottom`: positioned below the semicircle
+  /// - `PercentagePosition.left`: positioned to the left of the semicircle
+  /// - `PercentagePosition.right`: positioned to the right of the semicircle
+  
+  // Enum for percentage placement
+  // Exported from this file so consumers can reference `PercentagePosition`.
+  // (Declared here to keep related types together.)
+  
+  // See below for the enum declaration.
+  /// Position options for the percentage text shown on the chart.
+  ///
+  /// - `center`: centered in the middle of the semicircle
+  /// - `top`: positioned near the top of the semicircle
+  /// - `bottom`: positioned near the bottom (legacy default)
+  /// - `left`: positioned toward the left-center
+  /// - `right`: positioned toward the right-center
+  static const List<String> _percentagePositionValues = [
+    'center',
+    'top',
+    'bottom',
+    'left',
+    'right',
+  ];
+
+  /// Enum-like representation for percentage text placement.
+  /// Using a simple class-level enum alternative here to keep JSON mapping
+  /// straightforward. Consumers can use `PercentagePosition` constants.
+  // Define a simple enum-like class
+  // (kept minimal to avoid adding another file)
+  // Available values are: PercentagePosition.center, .top, .bottom, .left, .right
+  // The internal representation is a string matching `_percentagePositionValues`.
+  
+  final PercentagePosition percentagePosition;
+  /// Offset (in logical pixels) to move the percentage label outside the
+  /// semicircle for `top`/`bottom`/`left`/`right` placements. Positive values
+  /// move the label further outside. For `center` this is ignored.
+  final double percentageOffset;
   /// Color of the active (filled) portion of the chart.
   final Color activeColor;
+  /// Optional list of colors for the active portion (allows multiple colors).
+  /// When provided, these colors will be used sequentially across the
+  /// active sweep instead of the single `activeColor`.
+  final List<Color>? activeColors;
+  /// Optional list of percentages corresponding to `activeColors`.
+  /// Each value should be between 0 and 100 and represents a percentage of
+  /// the full semicircle (not of the total active percent). When provided,
+  /// the chart will render each segment using these percentages.
+  final List<double>? activePercentages;
+  /// Optional labels for each active segment used in the legend.
+  final List<String>? activeLabels;
 
   /// Color of the inactive (unfilled) portion of the chart.
   final Color inactiveColor;
@@ -18,6 +90,12 @@ class ChartStyle {
 
   /// Optional style for the legend text.
   final TextStyle? legendStyle;
+
+  /// Spacing (in logical pixels) between the legend and the chart widget below it.
+  /// Defaults to 24.0 to preserve previous layout.
+  final double legendSpacing;
+  /// Position of the legend relative to the semicircle chart. Defaults to `top`.
+  final SemiCircleLegendPosition semiCircleLegendPosition;
 
   /// Duration for the animation of the chart.
   final Duration animationDuration;
@@ -43,7 +121,12 @@ class ChartStyle {
   /// Constructs a ChartStyle object with optional parameters for customization.
   const ChartStyle({
     this.activeColor = Colors.blue,
+    this.activeColors,
+    this.activePercentages,
+    this.activeLabels,
     this.inactiveColor = const Color(0xFFE0E0E0),
+    this.percentagePosition = PercentagePosition.center,
+    this.percentageOffset = 8.0,
     this.textColor,
     this.percentageStyle,
     this.legendStyle,
@@ -51,6 +134,8 @@ class ChartStyle {
     this.animationCurve = Curves.easeInOut,
     this.showPercentageText = true,
     this.showLegend = true,
+    this.legendSpacing = 24.0,
+    this.semiCircleLegendPosition = SemiCircleLegendPosition.top,
     this.percentageFormatter,
     this.legendFormatter,
   });
@@ -89,6 +174,23 @@ class ChartStyle {
           json['mode']?.toString().contains('number') ??
           true,
       showLegend: json['showLegend'] ?? json['showlegend'] ?? true,
+        legendSpacing: json['legendSpacing'] != null ? (json['legendSpacing'] as num).toDouble() : 24.0,
+        semiCircleLegendPosition: json['legendPosition'] != null && json['legendPosition'] is String
+          ? _parseSemiCircleLegendPosition(json['legendPosition'] as String)
+          : SemiCircleLegendPosition.top,
+        activeColors: json['activeColors'] is List
+          ? (json['activeColors'] as List).map(_parseColor).toList()
+          : null,
+        activePercentages: json['activePercentages'] is List
+          ? (json['activePercentages'] as List).map((e) => (e as num).toDouble()).toList()
+          : null,
+        activeLabels: json['activeLabels'] is List
+          ? (json['activeLabels'] as List).map((e) => e.toString()).toList()
+          : null,
+        percentagePosition: json['percentagePosition'] != null && json['percentagePosition'] is String && _percentagePositionValues.contains(json['percentagePosition'])
+          ? _parsePercentagePosition(json['percentagePosition'] as String)
+          : (json['percentagePosition'] is Map ? _parsePercentagePosition(json['percentagePosition']['position'] as String?) : PercentagePosition.center),
+        percentageOffset: json['percentageOffset'] != null ? (json['percentageOffset'] as num).toDouble() : 8.0,
       // Note: percentageFormatter and legendFormatter cannot be parsed from JSON
       // as they are functions. They would need to be set programmatically.
     );
@@ -97,7 +199,16 @@ class ChartStyle {
   /// Converts the [ChartStyle] to a JSON map.
   Map<String, dynamic> toJson() {
     return {
-      'activeColor': _colorToHex(activeColor),
+        'activeColor': _colorToHex(activeColor),
+        'activeColors': activeColors != null
+          ? activeColors!.map(_colorToHex).toList()
+          : null,
+        'activePercentages': activePercentages,
+        'activeLabels': activeLabels,
+        'percentagePosition': _percentagePositionToString(percentagePosition),
+        'percentageOffset': percentageOffset,
+        'legendSpacing': legendSpacing,
+        'legendPosition': _semiCircleLegendPositionToString(semiCircleLegendPosition),
       'inactiveColor': _colorToHex(inactiveColor),
       'textColor': textColor != null ? _colorToHex(textColor!) : null,
       'animationDuration': animationDuration.inMilliseconds,
@@ -213,6 +324,71 @@ class ChartStyle {
     return null;
   }
 
+  static PercentagePosition _parsePercentagePosition(String? v) {
+    if (v == null) return PercentagePosition.center;
+    switch (v.toLowerCase()) {
+      case 'top':
+        return PercentagePosition.top;
+      case 'bottom':
+        return PercentagePosition.bottom;
+      case 'left':
+        return PercentagePosition.left;
+      case 'right':
+        return PercentagePosition.right;
+      case 'center':
+      default:
+        return PercentagePosition.center;
+    }
+  }
+
+
+  static SemiCircleLegendPosition _parseSemiCircleLegendPosition(String? v) {
+    if (v == null) return SemiCircleLegendPosition.top;
+    switch (v.toLowerCase()) {
+      case 'bottom':
+        return SemiCircleLegendPosition.bottom;
+      case 'left':
+        return SemiCircleLegendPosition.left;
+      case 'right':
+        return SemiCircleLegendPosition.right;
+      case 'top':
+      default:
+        return SemiCircleLegendPosition.top;
+    }
+  }
+
+  static String _percentagePositionToString(PercentagePosition p) {
+    switch (p) {
+      case PercentagePosition.top:
+        return 'top';
+      case PercentagePosition.bottom:
+        return 'bottom';
+      case PercentagePosition.left:
+        return 'left';
+      case PercentagePosition.right:
+        return 'right';
+      case PercentagePosition.center:
+      default:
+        return 'center';
+    }
+  }
+
+  
+
+  static String _semiCircleLegendPositionToString(SemiCircleLegendPosition p) {
+    switch (p) {
+      case SemiCircleLegendPosition.bottom:
+        return 'bottom';
+      case SemiCircleLegendPosition.left:
+        return 'left';
+      case SemiCircleLegendPosition.right:
+        return 'right';
+      case SemiCircleLegendPosition.top:
+      default:
+        return 'top';
+    }
+  }
+
   /// Helper method to parse font weight from string
   static FontWeight _parseFontWeight(dynamic weight) {
     if (weight == null) return FontWeight.normal;
@@ -250,6 +426,11 @@ class ChartStyle {
   /// Creates a copy of this ChartStyle with the given fields replaced with new values.
   ChartStyle copyWith({
     Color? activeColor,
+    List<Color>? activeColors,
+    List<double>? activePercentages,
+    List<String>? activeLabels,
+    PercentagePosition? percentagePosition,
+    double? percentageOffset,
     Color? inactiveColor,
     Color? textColor,
     TextStyle? percentageStyle,
@@ -260,9 +441,16 @@ class ChartStyle {
     bool? showLegend,
     String Function(double)? percentageFormatter,
     String Function(String, double)? legendFormatter,
+    double? legendSpacing,
+    SemiCircleLegendPosition? semiCircleLegendPosition,
   }) {
     return ChartStyle(
       activeColor: activeColor ?? this.activeColor,
+      activeColors: activeColors ?? this.activeColors,
+      activePercentages: activePercentages ?? this.activePercentages,
+      activeLabels: activeLabels ?? this.activeLabels,
+      percentagePosition: percentagePosition ?? this.percentagePosition,
+      percentageOffset: percentageOffset ?? this.percentageOffset,
       inactiveColor: inactiveColor ?? this.inactiveColor,
       textColor: textColor ?? this.textColor,
       percentageStyle: percentageStyle ?? this.percentageStyle,
@@ -273,6 +461,8 @@ class ChartStyle {
       showLegend: showLegend ?? this.showLegend,
       percentageFormatter: percentageFormatter ?? this.percentageFormatter,
       legendFormatter: legendFormatter ?? this.legendFormatter,
+      legendSpacing: legendSpacing ?? this.legendSpacing,
+      semiCircleLegendPosition: semiCircleLegendPosition ?? this.semiCircleLegendPosition,
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+
 import 'models.dart';
 import 'painter.dart';
 
@@ -21,6 +22,11 @@ class MaterialBarChart extends StatefulWidget {
   final VoidCallback?
       onAnimationComplete; // Callback for when animation finishes
   final bool interactive; // Enable hover/tap interactions
+  final bool showTooltip; // Show tooltip on hover
+  final Color? tooltipBackgroundColor; // Tooltip background color
+  final TextStyle? tooltipTextStyle; // Tooltip text style
+  final double tooltipPadding; // Tooltip inner padding
+  final double tooltipRadius; // Tooltip corner radius
 
   /// Creates an instance of [MaterialBarChart].
   const MaterialBarChart({
@@ -35,6 +41,11 @@ class MaterialBarChart extends StatefulWidget {
     this.horizontalGridLines = 5,
     this.onAnimationComplete,
     this.interactive = true,
+    this.showTooltip = false,
+    this.tooltipBackgroundColor,
+    this.tooltipTextStyle,
+    this.tooltipPadding = 6.0,
+    this.tooltipRadius = 6.0,
   });
 
   /// Creates a [MaterialBarChart] from JSON configuration.
@@ -287,6 +298,11 @@ class _MaterialBarChartState extends State<MaterialBarChart>
                 padding: widget.padding,
                 horizontalGridLines: widget.horizontalGridLines,
                 hoverPosition: _hoverPosition,
+                  showTooltip: widget.showTooltip,
+                  tooltipBackgroundColor: widget.tooltipBackgroundColor,
+                  tooltipTextStyle: widget.tooltipTextStyle,
+                  tooltipPadding: widget.tooltipPadding,
+                  tooltipRadius: widget.tooltipRadius,
               ),
             );
           },

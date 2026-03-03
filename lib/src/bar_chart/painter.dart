@@ -18,6 +18,11 @@ class BarChartPainter extends CustomPainter {
   final EdgeInsets padding; // Padding around the chart
   final int horizontalGridLines; // Number of horizontal grid lines to draw
   final Offset? hoverPosition; // Position of the mouse hover (for interaction)
+  final bool showTooltip; // Whether to show tooltip on hover
+  final Color? tooltipBackgroundColor;
+  final TextStyle? tooltipTextStyle;
+  final double tooltipPadding;
+  final double tooltipRadius;
 
   /// Creates an instance of [BarChartPainter].
   BarChartPainter({
@@ -29,7 +34,16 @@ class BarChartPainter extends CustomPainter {
     required this.padding,
     required this.horizontalGridLines,
     required this.hoverPosition,
+    required this.showTooltip,
+    required this.tooltipBackgroundColor,
+    required this.tooltipTextStyle,
+    required this.tooltipPadding,
+    required this.tooltipRadius,
   });
+
+  // Temporary storage for the hovered bar to draw tooltip on top
+  Offset? _pendingTooltipPos;
+  double? _pendingTooltipValue;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -49,8 +63,17 @@ class BarChartPainter extends CustomPainter {
       _drawGrid(canvas, chartArea, isHorizontalMode);
     }
 
+    // Reset pending tooltip before drawing
+    _pendingTooltipPos = null;
+    _pendingTooltipValue = null;
+
     _drawBars(canvas, chartArea, isHorizontalMode);
     _drawLabels(canvas, chartArea, isHorizontalMode);
+
+    // Draw tooltip last so it appears on top of bars
+    if (showTooltip && _pendingTooltipPos != null && _pendingTooltipValue != null) {
+      _drawTooltip(canvas, _pendingTooltipPos!, _pendingTooltipValue!, chartArea);
+    }
   }
 
   /// Determines if the chart is in horizontal orientation
@@ -250,6 +273,10 @@ class BarChartPainter extends CustomPainter {
             isInverted ? Alignment.topCenter : Alignment.bottomCenter,
             isInverted ? Alignment.bottomCenter : Alignment.topCenter,
           );
+          if (showTooltip && hoverPosition != null) {
+            _pendingTooltipPos = hoverPosition;
+            _pendingTooltipValue = data[dataIndex].value;
+          }
         }
 
         canvas.drawRRect(rect, paint);
@@ -338,6 +365,10 @@ class BarChartPainter extends CustomPainter {
             isReversed ? Alignment.centerRight : Alignment.centerLeft,
             isReversed ? Alignment.centerLeft : Alignment.centerRight,
           );
+          if (showTooltip && hoverPosition != null) {
+            _pendingTooltipPos = hoverPosition;
+            _pendingTooltipValue = data[dataIndex].value;
+          }
         }
 
         canvas.drawRRect(rect, paint);
@@ -401,6 +432,10 @@ class BarChartPainter extends CustomPainter {
           isInverted ? Alignment.topCenter : Alignment.bottomCenter,
           isInverted ? Alignment.bottomCenter : Alignment.topCenter,
         );
+        if (showTooltip && hoverPosition != null) {
+          _pendingTooltipPos = hoverPosition;
+          _pendingTooltipValue = data[i].value;
+        }
       }
 
       canvas.drawRRect(rect, paint);
@@ -464,6 +499,10 @@ class BarChartPainter extends CustomPainter {
           isReversed ? Alignment.centerRight : Alignment.centerLeft,
           isReversed ? Alignment.centerLeft : Alignment.centerRight,
         );
+        if (showTooltip && hoverPosition != null) {
+          _pendingTooltipPos = hoverPosition;
+          _pendingTooltipValue = data[i].value;
+        }
       }
 
       canvas.drawRRect(rect, paint);
@@ -727,7 +766,43 @@ class BarChartPainter extends CustomPainter {
         oldDelegate.showGrid != showGrid ||
         oldDelegate.showValues != showValues ||
         oldDelegate.hoverPosition != hoverPosition ||
+        oldDelegate.showTooltip != showTooltip ||
+        oldDelegate.tooltipBackgroundColor != tooltipBackgroundColor ||
+        oldDelegate.tooltipTextStyle != tooltipTextStyle ||
+        oldDelegate.tooltipPadding != tooltipPadding ||
+        oldDelegate.tooltipRadius != tooltipRadius ||
         oldDelegate.horizontalGridLines != horizontalGridLines;
+  }
+}
+
+/// Draw a small tooltip near the hover position showing the bar value.
+extension on BarChartPainter {
+  void _drawTooltip(Canvas canvas, Offset pos, double value, Rect bounds) {
+    final text = value.toStringAsFixed(1);
+    final effectiveTextStyle = tooltipTextStyle ?? TextStyle(color: Colors.white, fontSize: 12);
+    final textSpan = TextSpan(text: text, style: effectiveTextStyle);
+    final tp = TextPainter(text: textSpan, textDirection: TextDirection.ltr)..layout();
+
+    final padding = tooltipPadding;
+    final bgWidth = tp.width + padding * 2;
+    final bgHeight = tp.height + padding * 2;
+
+    double x = pos.dx + 10;
+    double y = pos.dy - bgHeight - 10;
+
+    if (x + bgWidth > bounds.right) x = bounds.right - bgWidth - 4;
+    if (x < bounds.left) x = bounds.left + 4;
+    if (y < bounds.top) y = pos.dy + 10;
+
+    final rect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(x, y, bgWidth, bgHeight),
+      Radius.circular(tooltipRadius),
+    );
+
+    final paint = Paint()..color = (tooltipBackgroundColor ?? Colors.black).withOpacity(0.75);
+    canvas.drawRRect(rect, paint);
+
+    tp.paint(canvas, Offset(x + padding, y + padding));
   }
 }
 
