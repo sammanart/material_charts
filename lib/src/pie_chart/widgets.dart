@@ -556,11 +556,15 @@ class MaterialPieChartState extends State<MaterialPieChart>
   /// Determines which segment of the pie chart is hovered based on the mouse position.
   ///
   /// Returns the index of the hovered segment or null if not hovering over any segment.
-  int? _getHoveredSegment(Offset localPosition) {
+  int? _getHoveredSegment(Offset localPosition, {Size? customSize}) {
+    // Use provided size or fall back to widget dimensions
+    final chartWidth = customSize?.width ?? widget.width;
+    final chartHeight = customSize?.height ?? widget.height;
+    
     // Get outer and inner radius
     final outerRadius = [
-      (widget.width - widget.padding.horizontal) / 2,
-      (widget.height - widget.padding.vertical) / 2,
+      (chartWidth - widget.padding.horizontal) / 2,
+      (chartHeight - widget.padding.vertical) / 2,
       widget.chartRadius,
     ].reduce(min);
     final innerRadius = outerRadius * widget.style.holeRadius;
@@ -568,15 +572,15 @@ class MaterialPieChartState extends State<MaterialPieChart>
     // Center of the pie chart
     final position = Offset(
       switch (widget.style.chartAlignment.horizontal) {
-        Horizontal.center => widget.width / 2,
+        Horizontal.center => chartWidth / 2,
         Horizontal.left => outerRadius + widget.padding.left,
-        Horizontal.right => widget.width - (widget.padding.right + outerRadius),
+        Horizontal.right => chartWidth - (widget.padding.right + outerRadius),
       },
       switch (widget.style.chartAlignment.vertical) {
-        Vertical.center => widget.height / 2,
+        Vertical.center => chartHeight / 2,
         Vertical.top => outerRadius + widget.padding.top,
         Vertical.bottom =>
-          widget.height - (widget.padding.bottom + outerRadius),
+          chartHeight - (widget.padding.bottom + outerRadius),
       },
     );
 
@@ -617,79 +621,93 @@ class MaterialPieChartState extends State<MaterialPieChart>
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      opaque: false,
-      // Handle mouse hover events for interactivity.
-      onHover: widget.interactive
-          ? (event) {
-              // Get the index of the currently hovered segment based on mouse position.
-              final newIndex = _getHoveredSegment(event.localPosition);
-              // Update state only if the hovered segment has changed.
-              if (newIndex != _hoveredSegmentIndex) {
-                setState(() => _hoveredSegmentIndex = newIndex);
-              }
-            }
-          : null,
-      // Handle mouse exit events to reset the hovered segment.
-      onExit: widget.interactive
-          ? (_) => setState(() => _hoveredSegmentIndex = null)
-          : null,
-      child: InkWell(
-        // Prevent InkWell from drawing any hover/highlight overlay
-        // so the background/box color doesn't change when hovering
-        // over the widget area (but keep tap handling).
-        overlayColor: MaterialStateProperty.all(Colors.transparent),
-        splashColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-        hoverColor: Colors.transparent,
-        onTapUp: widget.interactive
-            ? (event) {
-                // Get the index of the currently hovered segment based on mouse position.
-                final newIndex = _getHoveredSegment(event.localPosition);
-                // Update state only if the hovered segment has changed.
-                if (newIndex != null) {
-                  setState(() => _hoveredSegmentIndex = newIndex);
-                  if (newIndex < widget.data.length) {
-                    widget.data[newIndex].onTap?.call();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Determine the actual size to use - either widget dimensions or constrained size
+        final actualWidth = widget.width != double.infinity 
+            ? widget.width 
+            : constraints.maxWidth;
+        final actualHeight = widget.height != double.infinity 
+            ? widget.height 
+            : constraints.maxHeight;
+        
+        // Use the smaller of widget's defined size and available constraints
+        final chartWidth = min(actualWidth, constraints.maxWidth);
+        final chartHeight = min(actualHeight, constraints.maxHeight);
+        final renderSize = Size(chartWidth, chartHeight);
+
+        return MouseRegion(
+          opaque: false,
+          // Handle mouse hover events for interactivity.
+          onHover: widget.interactive
+              ? (event) {
+                  // Get the index of the currently hovered segment based on mouse position.
+                  final newIndex = _getHoveredSegment(event.localPosition, customSize: renderSize);
+                  // Update state only if the hovered segment has changed.
+                  if (newIndex != _hoveredSegmentIndex) {
+                    setState(() => _hoveredSegmentIndex = newIndex);
                   }
                 }
-              }
-            : null,
-        child: Container(
-          width: widget.width, // Set the width of the pie chart.
-          height: widget.height, // Set the height of the pie chart.
-          color: widget
-              .style.backgroundColor, // Set the background color from style.
-          child: AnimatedBuilder(
-            // Build the pie chart with animation.
-            animation: _animation,
-            builder: (context, _) {
-              return CustomPaint(
-                size: Size(
-                  widget.width,
-                  widget.height,
-                ), // Size of the custom painter.
-                painter: PieChartPainter(
-                  data: widget.data, // Pass the data for pie chart segments.
-                  sliceSizes: _setSizes(
-                    widget.data.fold(0.0, (sum, item) => sum + item.value),
-                  ),
-                  // Pass the sizes of the piechart slices
-                  progress: _animation.value, // Pass the animation progress.
-                  style: widget.style, // Pass the style configurations.
-                  showLabelOnlyOnHover: widget.showLabelOnlyOnHover,
-                  // Pass the show label configuration
-                  padding: widget.padding, // Pass the padding.
-                  hoveredSegmentIndex:
-                      _hoveredSegmentIndex, // Pass the index of the hovered segment.
-                  chartRadius: widget.chartRadius, // Pass the chart radius
-                  sliceAnimationProgress: _sliceAnimationProgress, // Pass per-slice animation progress
-                ),
-              );
-            },
+              : null,
+          // Handle mouse exit events to reset the hovered segment.
+          onExit: widget.interactive
+              ? (_) => setState(() => _hoveredSegmentIndex = null)
+              : null,
+          child: InkWell(
+            // Prevent InkWell from drawing any hover/highlight overlay
+            // so the background/box color doesn't change when hovering
+            // over the widget area (but keep tap handling).
+            overlayColor: MaterialStateProperty.all(Colors.transparent),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            hoverColor: Colors.transparent,
+            onTapUp: widget.interactive
+                ? (event) {
+                    // Get the index of the currently hovered segment based on mouse position.
+                    final newIndex = _getHoveredSegment(event.localPosition, customSize: renderSize);
+                    // Update state only if the hovered segment has changed.
+                    if (newIndex != null) {
+                      setState(() => _hoveredSegmentIndex = newIndex);
+                      if (newIndex < widget.data.length) {
+                        widget.data[newIndex].onTap?.call();
+                      }
+                    }
+                  }
+                : null,
+            child: Container(
+              width: chartWidth, // Set the width of the pie chart.
+              height: chartHeight, // Set the height of the pie chart.
+              color: widget
+                  .style.backgroundColor, // Set the background color from style.
+              child: AnimatedBuilder(
+                // Build the pie chart with animation.
+                animation: _animation,
+                builder: (context, _) {
+                  return CustomPaint(
+                    size: renderSize, // Use the actual render size
+                    painter: PieChartPainter(
+                      data: widget.data, // Pass the data for pie chart segments.
+                      sliceSizes: _setSizes(
+                        widget.data.fold(0.0, (sum, item) => sum + item.value),
+                      ),
+                      // Pass the sizes of the piechart slices
+                      progress: _animation.value, // Pass the animation progress.
+                      style: widget.style, // Pass the style configurations.
+                      showLabelOnlyOnHover: widget.showLabelOnlyOnHover,
+                      // Pass the show label configuration
+                      padding: widget.padding, // Pass the padding.
+                      hoveredSegmentIndex:
+                          _hoveredSegmentIndex, // Pass the index of the hovered segment.
+                      chartRadius: widget.chartRadius, // Pass the chart radius
+                      sliceAnimationProgress: _sliceAnimationProgress, // Pass per-slice animation progress
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
