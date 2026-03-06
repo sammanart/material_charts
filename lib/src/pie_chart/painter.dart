@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'models.dart';
@@ -29,6 +30,9 @@ class PieChartPainter extends CustomPainter {
 
   /// Radius of the pie chart
   final double chartRadius;
+  
+  /// Per-slice animation progress for pop-out effects
+  final List<double> sliceAnimationProgress;
 
   /// Constructor for [PieChartPainter].
   ///
@@ -43,6 +47,7 @@ class PieChartPainter extends CustomPainter {
     required this.hoveredSegmentIndex,
     required this.showLabelOnlyOnHover,
     required this.chartRadius,
+    required this.sliceAnimationProgress,
   });
 
   @override
@@ -115,8 +120,28 @@ class PieChartPainter extends CustomPainter {
             ? _lightenColor(segmentColor) // Lighten color if hovered
             : segmentColor;
 
-      // Draw the segment, increasing radius if hovered for elevation effect.
-      final segmentRadius = hoveredSegmentIndex == i ? radius * 1.05 : radius;
+      // Only apply pop-out effect if slice has explicit animation config
+      final config = data[i].animationConfig;
+      double segmentRadius = radius;
+      
+      if (config != null && style.sliceAnimationsEnabled) {
+        // Calculate the pop-out effect based on slice animation progress
+        final animProgress = sliceAnimationProgress.isNotEmpty && i < sliceAnimationProgress.length 
+            ? sliceAnimationProgress[i] 
+            : 0.0;
+        
+        // Get the pop-out offset from the slice config
+        final popOutOffset = config.popOutOffset;
+        
+        // Interpolate between base radius and popped-out radius.
+        // Keep the same center so slices grow in radius (hover-like behavior).
+        segmentRadius = radius + (radius * (popOutOffset - 1.0) * animProgress);
+      }
+      
+      // Apply hover effect (slightly larger and lighter)
+      if (hoveredSegmentIndex == i) {
+        segmentRadius = max(segmentRadius, radius * 1.05);
+      }
 
       // Draw the arc representing the segment of the pie chart.
       canvas.drawArc(
@@ -365,6 +390,7 @@ class PieChartPainter extends CustomPainter {
     return oldDelegate.progress != progress ||
         oldDelegate.data != data ||
         oldDelegate.style != style ||
-        oldDelegate.hoveredSegmentIndex != hoveredSegmentIndex;
+        oldDelegate.hoveredSegmentIndex != hoveredSegmentIndex ||
+        !listEquals(oldDelegate.sliceAnimationProgress, sliceAnimationProgress);
   }
 }

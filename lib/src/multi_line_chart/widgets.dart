@@ -1,5 +1,8 @@
+import 'dart:math';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'models.dart';
 import 'painter.dart';
@@ -170,7 +173,7 @@ class MultiLineChart extends StatefulWidget {
 }
 
 class MultiLineChartState extends State<MultiLineChart>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late AnimationController _controller; // Controller for managing animations.
   late Animation<double>
       _animation; // Animation object for controlling the animation progress.
@@ -179,6 +182,11 @@ class MultiLineChartState extends State<MultiLineChart>
   Offset _panOffset = Offset.zero; // Current offset for panning.
   Offset? _lastFocalPoint; // Last focal point for scaling gestures.
   Size? _containerSize; // Size of the chart container.
+  List<double> _lineAnimationProgress = []; // Per-line animation progress
+  Map<int, double> _segmentAnimationProgress = {}; // Per-segment animation progress
+  final Set<int> _manuallyTriggeredOrders = {}; // Animation orders that have been manually triggered
+  final Map<int, DateTime> _manualTriggerStartTime = {}; // Tracks when each manual segment was triggered (wall clock time)
+  Ticker? _manualSegmentTicker; // Separate ticker for updating manual segments
 
   @override
   void initState() {
@@ -187,9 +195,12 @@ class MultiLineChartState extends State<MultiLineChart>
   }
 
   void _setupAnimation() {
+    // Calculate total animation duration based on line animation configurations
+    final totalDuration = _calculateTotalAnimationDuration();
+    
     _controller = AnimationController(
       vsync: this,
-      duration: widget.style.animation.duration,
+      duration: totalDuration,
     );
 
     _animation = CurvedAnimation(
@@ -197,18 +208,341 @@ class MultiLineChartState extends State<MultiLineChart>
       curve: widget.style.animation.curve,
     );
 
+    // Listen to animation changes to update per-line progress
+    _controller.addListener(() {
+      _updateLineAnimationProgress();
+    });
+
+    // Initialize animation progress before first paint to avoid a one-frame flash
+    // where lines could appear fully rendered.
+    _updateLineAnimationProgress();
+
     // Start the animation if enabled; otherwise, set it to fully completed.
     if (widget.style.animation.enabled) {
       _controller.forward();
     } else {
       _controller.value = 1.0;
+      _updateLineAnimationProgress();
+    }
+  }
+
+  /// Calculates the total animation duration based on individual line configurations
+  Duration _calculateTotalAnimationDuration() {
+    int lineDurationMs = 0;
+    int segmentDurationMs = 0;
+    
+    // Calculate line animation duration (existing logic)
+    // Group lines by animation order
+    final linesByOrder = <int, List<int>>{};
+    
+    for (int i = 0; i < widget.series.length; i++) {
+      final config = widget.series[i].animationConfig;
+      final order = config?.animationOrder ?? 0;
+      
+      if (!linesByOrder.containsKey(order)) {
+        linesByOrder[order] = [];
+      }
+      linesByOrder[order]!.add(i);
+    }
+    
+    // Sort orders
+    final sortedOrders = linesByOrder.keys.toList()..sort();
+    
+    // Calculate timing for each order group
+    for (final order in sortedOrders) {
+      int groupDuration = 0;
+      int nextDelay = 0;
+      
+      // Find max duration in this order group
+      for (final lineIndex in linesByOrder[order]!) {
+        final config = widget.series[lineIndex].animationConfig;
+        final duration = config?.duration?.inMilliseconds 
+            ?? widget.style.defaultAnimationDuration.inMilliseconds;
+        groupDuration = max(groupDuration, duration);
+        
+        // Get delay for next animation
+        final trigger = config?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+        if (trigger == LineAnimationTrigger.afterDelay) {
+          nextDelay = max(nextDelay, 
+              (config?.delayBeforeNext ?? widget.style.defaultDelayBeforeNext).inMilliseconds);
+        }
+      }
+      
+      lineDurationMs += groupDuration;
+      
+      // Only add delay if there are more orders to come
+      if (sortedOrders.indexOf(order) < sortedOrders.length - 1) {
+        lineDurationMs += nextDelay;
+      }
+    }
+    
+    // If no custom animations, use default duration
+    if (lineDurationMs == 0) {
+      lineDurationMs = widget.style.defaultAnimationDuration.inMilliseconds;
+    }
+    
+    // Calculate segment animation duration
+    final segmentConfigs = widget.style.segmentAnimationConfigs;
+    if (segmentConfigs.isNotEmpty) {
+      final sortedSegmentOrders = segmentConfigs.keys.toList()..sort();
+      
+      for (final segmentOrder in sortedSegmentOrders) {
+        final config = segmentConfigs[segmentOrder]!;
+        
+        // Only include duration for non-manual or already-triggered manual segments
+        bool shouldInclude = true;
+        if (config.animationTrigger == LineAnimationTrigger.manual) {
+          shouldInclude = _manuallyTriggeredOrders.contains(segmentOrder);
+        }
+        
+        if (shouldInclude) {
+          final duration = config.duration?.inMilliseconds 
+              ?? widget.style.defaultSegmentAnimationDuration.inMilliseconds;
+          
+          segmentDurationMs += duration;
+          
+          // Add delay if there are more segments
+          if (sortedSegmentOrders.indexOf(segmentOrder) < sortedSegmentOrders.length - 1) {
+            final delay = config.delayBeforeNext.inMilliseconds;
+            segmentDurationMs += delay;
+          }
+        }
+      }
+    }
+    
+    // Total duration is line duration + segment duration (segments start after lines complete)
+    final totalMilliseconds = lineDurationMs + segmentDurationMs;
+    
+    return Duration(milliseconds: max(totalMilliseconds, 100));
+  }
+
+  /// Updates per-line animation progress based on current animation time
+  void _updateLineAnimationProgress() {
+    _lineAnimationProgress = List<double>.filled(widget.series.length, 0.0);
+    _segmentAnimationProgress = {};
+    
+    final currentTimeMs = _controller.value * _controller.duration!.inMilliseconds;
+    
+    // Calculate line animation duration first
+    int lineDurationMs = 0;
+    
+    // Group lines by animation order
+    final linesByOrder = <int, List<int>>{};
+    for (int i = 0; i < widget.series.length; i++) {
+      final config = widget.series[i].animationConfig;
+      final order = config?.animationOrder ?? 0;
+      
+      if (!linesByOrder.containsKey(order)) {
+        linesByOrder[order] = [];
+      }
+      linesByOrder[order]!.add(i);
+    }
+    
+    // Sort orders
+    final sortedOrders = linesByOrder.keys.toList()..sort();
+    
+    // Calculate when each order group should start
+    int accumulatedTimeMs = 0;
+    
+    for (final order in sortedOrders) {
+      int groupDuration = 0;
+      int nextDelay = 0;
+      
+      // Find max duration and delay in this group
+      for (final lineIndex in linesByOrder[order]!) {
+        final config = widget.series[lineIndex].animationConfig;
+        final duration = config?.duration?.inMilliseconds 
+            ?? widget.style.defaultAnimationDuration.inMilliseconds;
+        groupDuration = max(groupDuration, duration);
+        
+        final trigger = config?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+        if (trigger == LineAnimationTrigger.afterDelay) {
+          nextDelay = max(nextDelay, 
+              (config?.delayBeforeNext ?? widget.style.defaultDelayBeforeNext).inMilliseconds);
+        }
+      }
+      
+      // Update progress for each line in this order group
+      final groupStartTimeMs = accumulatedTimeMs;
+      final groupEndTimeMs = accumulatedTimeMs + groupDuration;
+      
+      for (final lineIndex in linesByOrder[order]!) {
+        final config = widget.series[lineIndex].animationConfig;
+        final trigger = config?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+        
+        // For manual triggers, only advance if this order has been manually triggered
+        bool shouldAdvance = true;
+        if (trigger == LineAnimationTrigger.manual) {
+          shouldAdvance = _manuallyTriggeredOrders.contains(order);
+        }
+        
+        if (shouldAdvance) {
+          if (currentTimeMs >= groupStartTimeMs && currentTimeMs <= groupEndTimeMs) {
+            final lineProgress = (currentTimeMs - groupStartTimeMs) / groupDuration;
+            _lineAnimationProgress[lineIndex] = min(lineProgress, 1.0);
+          } else if (currentTimeMs > groupEndTimeMs) {
+            _lineAnimationProgress[lineIndex] = 1.0;
+          }
+        }
+      }
+      
+      accumulatedTimeMs += groupDuration + (sortedOrders.indexOf(order) < sortedOrders.length - 1 ? nextDelay : 0);
+    }
+    
+    lineDurationMs = accumulatedTimeMs;
+    
+    // Calculate segment animation progress (starts after line animations complete)
+    final segmentConfigs = widget.style.segmentAnimationConfigs;
+    if (segmentConfigs.isNotEmpty) {
+      final sortedSegmentOrders = segmentConfigs.keys.toList()..sort();
+      
+      for (final segmentOrder in sortedSegmentOrders) {
+        final config = segmentConfigs[segmentOrder]!;
+        final duration = config.duration?.inMilliseconds 
+            ?? widget.style.defaultSegmentAnimationDuration.inMilliseconds;
+        
+        // Check if this is a manual trigger
+        final isManualTrigger = config.animationTrigger == LineAnimationTrigger.manual;
+        final isTriggered = _manuallyTriggeredOrders.contains(segmentOrder);
+        
+        if (isManualTrigger && !isTriggered) {
+          // Not yet triggered - no progress
+          _segmentAnimationProgress[segmentOrder] = 0.0;
+          continue;
+        }
+        
+        // Calculate progress differently for manual vs non-manual segments
+        if (isManualTrigger && _manualTriggerStartTime.containsKey(segmentOrder)) {
+          // Manual segment: calculate progress based on elapsed time since trigger
+          final startTime = _manualTriggerStartTime[segmentOrder]!;
+          final elapsed = DateTime.now().difference(startTime).inMilliseconds.toDouble();
+          
+          if (elapsed <= duration) {
+            final segmentProgress = elapsed / duration;
+            _segmentAnimationProgress[segmentOrder] = min(segmentProgress, 1.0);
+          } else {
+            _segmentAnimationProgress[segmentOrder] = 1.0;
+          }
+        } else if (!isManualTrigger) {
+          // Non-manual segment: use sequential timing based on controller timeline
+          // Calculate accumulated time from all previous non-manual segments
+          int accumulatedSegmentTimeMs = 0;
+          for (final prevOrder in sortedSegmentOrders) {
+            if (prevOrder >= segmentOrder) break;
+            
+            final prevConfig = segmentConfigs[prevOrder]!;
+            final prevIsManual = prevConfig.animationTrigger == LineAnimationTrigger.manual;
+            final prevIsTriggered = _manuallyTriggeredOrders.contains(prevOrder);
+            
+            // Only count non-manual or triggered segments
+            if (!prevIsManual || prevIsTriggered) {
+              final prevDuration = prevConfig.duration?.inMilliseconds 
+                  ?? widget.style.defaultSegmentAnimationDuration.inMilliseconds;
+              accumulatedSegmentTimeMs += prevDuration;
+              if (prevOrder < sortedSegmentOrders.last) {
+                accumulatedSegmentTimeMs += prevConfig.delayBeforeNext.inMilliseconds;
+              }
+            }
+          }
+          final segmentStartTimeMs = (lineDurationMs + accumulatedSegmentTimeMs).toDouble();
+          final segmentEndTimeMs = segmentStartTimeMs + duration;
+          
+          // Calculate progress based on current time
+          if (currentTimeMs >= segmentStartTimeMs && currentTimeMs <= segmentEndTimeMs) {
+            final segmentProgress = (currentTimeMs - segmentStartTimeMs) / duration;
+            _segmentAnimationProgress[segmentOrder] = min(segmentProgress, 1.0);
+          } else if (currentTimeMs > segmentEndTimeMs) {
+            _segmentAnimationProgress[segmentOrder] = 1.0;
+          } else {
+            _segmentAnimationProgress[segmentOrder] = 0.0;
+          }
+        }
+      }
+    }
+    
+    // Check if any manual segments are still animating
+    bool hasActiveManualSegments = false;
+    for (final segmentOrder in _manuallyTriggeredOrders) {
+      if (_segmentAnimationProgress[segmentOrder] != null && 
+          _segmentAnimationProgress[segmentOrder]! < 1.0) {
+        hasActiveManualSegments = true;
+        break;
+      }
+    }
+    
+    // Manage manual segment ticker
+    if (hasActiveManualSegments && _manualSegmentTicker == null) {
+      // Start ticker for manual segments
+      _manualSegmentTicker = createTicker((_) {
+        if (mounted) {
+          setState(() {
+            _updateLineAnimationProgress();
+          });
+        }
+      });
+      _manualSegmentTicker!.start();
+    } else if (!hasActiveManualSegments && _manualSegmentTicker != null) {
+      // Stop ticker if no manual segments are active
+      _manualSegmentTicker!.dispose();
+      _manualSegmentTicker = null;
+      // Force a final repaint to show the completed animation even if focus is elsewhere
+      // This ensures the final frame is rendered after the ticker stops
+      if (mounted) {
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+      }
+    }
+    
+    // Update UI if animation is in progress or manual segments are active
+    if (mounted && (_controller.isAnimating || hasActiveManualSegments)) {
+      setState(() {});
     }
   }
 
   @override
   void dispose() {
     _controller.dispose(); // Dispose of the animation controller.
+    _manualSegmentTicker?.dispose(); // Dispose of the manual segment ticker.
     super.dispose();
+  }
+
+  /// Triggers animation for a specific animation order.
+  /// 
+  /// This method marks the given [animationOrder] as manually triggered,
+  /// allowing animations with [LineAnimationTrigger.manual] type to start.
+  /// Animations respect order dependencies - an animation won't start
+  /// until all previous orders have completed.
+  /// 
+  /// Example:
+  /// ```dart
+  /// final globalKey = GlobalKey<MultiLineChartState>();
+  /// 
+  /// // In your chart widget
+  /// MultiLineChart(
+  ///   key: globalKey,
+  ///   series: [...],
+  ///   style: [...],
+  /// )
+  /// 
+  /// // Trigger animation order 0
+  /// globalKey.currentState?.triggerAnimation(0);
+  /// ```
+  void triggerAnimation(int animationOrder) {
+    _manuallyTriggeredOrders.add(animationOrder);
+    
+    // Record the wall clock time when this segment was triggered
+    // This allows the segment to animate independently of other animations
+    _manualTriggerStartTime[animationOrder] = DateTime.now();
+    
+    // Immediately update to detect the new manual segment and start the ticker
+    _updateLineAnimationProgress();
+    
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -279,6 +613,8 @@ class MultiLineChartState extends State<MultiLineChart>
                   _crosshairPosition, // Position of the crosshair.
               scale: _scale, // Current scale factor.
               panOffset: _panOffset, // Current pan offset.
+              lineAnimationProgress: _lineAnimationProgress, // Per-line animation progress.
+              segmentAnimationProgress: _segmentAnimationProgress, // Per-segment animation progress.
             ),
             size: Size(
               width,

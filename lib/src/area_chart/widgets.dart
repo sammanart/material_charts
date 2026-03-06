@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_html/flutter_html.dart';
 
 import '../shared/shared_models.dart';
@@ -139,15 +140,20 @@ class MaterialAreaChart extends StatefulWidget {
   }
 
   @override
-  State<MaterialAreaChart> createState() => _MaterialAreaChartState();
+  MaterialAreaChartState createState() => MaterialAreaChartState();
 }
 
-class _MaterialAreaChartState extends State<MaterialAreaChart> with SingleTickerProviderStateMixin {
+class MaterialAreaChartState extends State<MaterialAreaChart> with TickerProviderStateMixin {
   late AnimationController _controller; // Animation controller for managing the animation
   late Animation<double> _animation; // Animation for the progress of the chart
   Offset? _tooltipPosition; // Position of the tooltip when hovering over points
   KeyEventData? _activeHtmlTooltip; // The currently active HTML tooltip
   Offset? _activeTooltipPosition; // Position of the active HTML tooltip
+  List<double> _seriesAnimationProgress = []; // Per-series animation progress
+  Map<int, double> _segmentAnimationProgress = {}; // Per-segment animation progress
+  final Set<int> _manuallyTriggeredOrders = {}; // Animation orders that have been manually triggered
+  final Map<int, DateTime> _manualTriggerStartTime = {}; // Wall-clock time when each manual trigger was activated
+  Ticker? _manualSegmentTicker; // Separate ticker for driving manual segment animation updates
 
   @override
   void initState() {
@@ -157,8 +163,11 @@ class _MaterialAreaChartState extends State<MaterialAreaChart> with SingleTicker
 
   /// Sets up the animation controller and animation
   void _setupAnimation() {
+    // Calculate total animation duration based on series animation configurations
+    final totalDuration = _calculateTotalAnimationDuration();
+
     _controller = AnimationController(
-      duration: widget.style.animationDuration, // Duration of the animation from the style
+      duration: totalDuration,
       vsync: this, // Use this state as the vsync provider
     );
 
@@ -176,12 +185,290 @@ class _MaterialAreaChartState extends State<MaterialAreaChart> with SingleTicker
         }
       });
 
+    // Listen to animation changes to update per-series and per-segment progress
+    _controller.addListener(() {
+      _updateAnimationProgress();
+    });
+
+    // Initialize animation progress before first paint to avoid a one-frame flash
+    // where areas could appear fully rendered.
+    _updateAnimationProgress();
+
     _controller.forward(); // Start the animation
+  }
+
+  /// Calculates the total animation duration based on individual series configurations
+  Duration _calculateTotalAnimationDuration() {
+    int seriesDurationMs = 0;
+    int segmentDurationMs = 0;
+
+    // Calculate series animation duration
+    // Group series by animation order
+    final seriesByOrder = <int, List<int>>{};
+
+    for (int i = 0; i < widget.series.length; i++) {
+      final config = widget.series[i].animationConfig;
+      final order = config?.animationOrder ?? 0;
+
+      if (!seriesByOrder.containsKey(order)) {
+        seriesByOrder[order] = [];
+      }
+      seriesByOrder[order]!.add(i);
+    }
+
+    // Sort orders
+    final sortedOrders = seriesByOrder.keys.toList()..sort();
+
+    // Calculate timing for each order group
+    for (final order in sortedOrders) {
+      int groupDuration = 0;
+      int nextDelay = 0;
+
+      // Find max duration in this order group
+      for (final seriesIndex in seriesByOrder[order]!) {
+        final config = widget.series[seriesIndex].animationConfig;
+        final duration = config?.duration?.inMilliseconds ?? widget.style.animationDuration.inMilliseconds;
+        groupDuration = math.max(groupDuration, duration);
+
+        // Get delay for next animation
+        final trigger = config?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+        if (trigger == AreaAnimationTrigger.afterDelay) {
+          nextDelay = math.max(nextDelay, (config?.delayBeforeNext ?? widget.style.defaultDelayBeforeNext).inMilliseconds);
+        }
+      }
+
+      seriesDurationMs += groupDuration;
+
+      // Only add delay if there are more orders to come
+      if (sortedOrders.indexOf(order) < sortedOrders.length - 1) {
+        seriesDurationMs += nextDelay;
+      }
+    }
+
+    // If no custom animations, use default duration
+    if (seriesDurationMs == 0) {
+      seriesDurationMs = widget.style.animationDuration.inMilliseconds;
+    }
+
+    // Calculate segment animation duration (only count auto-trigger segments for total duration)
+    final segmentConfigs = widget.style.segmentAnimationConfigs;
+    if (segmentConfigs.isNotEmpty) {
+      final sortedSegmentOrders = segmentConfigs.keys.toList()..sort();
+
+      for (final segmentOrder in sortedSegmentOrders) {
+        final config = segmentConfigs[segmentOrder]!;
+        // Only count duration for auto-trigger segments; manual ones are not part of the timeline
+        if (config.animationTrigger != AreaAnimationTrigger.manual) {
+          final duration = config.duration?.inMilliseconds ?? widget.style.defaultSegmentAnimationDuration.inMilliseconds;
+
+          segmentDurationMs += duration;
+
+          // Add delay if there are more segments
+          if (sortedSegmentOrders.indexOf(segmentOrder) < sortedSegmentOrders.length - 1) {
+            final delay = config.delayBeforeNext.inMilliseconds;
+            segmentDurationMs += delay;
+          }
+        }
+      }
+    }
+
+    // Total duration is series duration + auto-trigger segment duration only
+    // Manual segments are driven by a separate ticker, not the main controller
+    final totalMilliseconds = seriesDurationMs + segmentDurationMs;
+
+    return Duration(milliseconds: math.max(totalMilliseconds, 100));
+  }
+
+  /// Updates per-series and per-segment animation progress based on current animation time
+  void _updateAnimationProgress() {
+    _seriesAnimationProgress = List<double>.filled(widget.series.length, 0.0);
+    _segmentAnimationProgress = {};
+
+    final currentTimeMs = _controller.value * _controller.duration!.inMilliseconds;
+
+    // Calculate series animation duration first
+    int seriesDurationMs = 0;
+
+    // Group series by animation order
+    final seriesByOrder = <int, List<int>>{};
+    for (int i = 0; i < widget.series.length; i++) {
+      final config = widget.series[i].animationConfig;
+      final order = config?.animationOrder ?? 0;
+
+      if (!seriesByOrder.containsKey(order)) {
+        seriesByOrder[order] = [];
+      }
+      seriesByOrder[order]!.add(i);
+    }
+
+    // Sort orders
+    final sortedOrders = seriesByOrder.keys.toList()..sort();
+
+    // Calculate when each order group should start
+    int accumulatedTimeMs = 0;
+
+    for (final order in sortedOrders) {
+      int groupDuration = 0;
+      int nextDelay = 0;
+
+      // Find max duration and delay in this group
+      for (final seriesIndex in seriesByOrder[order]!) {
+        final config = widget.series[seriesIndex].animationConfig;
+        final duration = config?.duration?.inMilliseconds ?? widget.style.animationDuration.inMilliseconds;
+        groupDuration = math.max(groupDuration, duration);
+
+        final trigger = config?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+        if (trigger == AreaAnimationTrigger.afterDelay) {
+          nextDelay = math.max(nextDelay, (config?.delayBeforeNext ?? widget.style.defaultDelayBeforeNext).inMilliseconds);
+        }
+      }
+
+      // Update progress for each series in this order group
+      final groupStartTimeMs = accumulatedTimeMs;
+      final groupEndTimeMs = accumulatedTimeMs + groupDuration;
+
+      for (final seriesIndex in seriesByOrder[order]!) {
+        final config = widget.series[seriesIndex].animationConfig;
+        final trigger = config?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+
+        // For manual triggers, only advance if this order has been manually triggered
+        bool shouldAdvance = true;
+        if (trigger == AreaAnimationTrigger.manual) {
+          shouldAdvance = _manuallyTriggeredOrders.contains(order);
+        }
+
+        if (shouldAdvance) {
+          if (currentTimeMs >= groupStartTimeMs && currentTimeMs <= groupEndTimeMs) {
+            final seriesProgress = (currentTimeMs - groupStartTimeMs) / groupDuration;
+            _seriesAnimationProgress[seriesIndex] = math.min(seriesProgress, 1.0);
+          } else if (currentTimeMs > groupEndTimeMs) {
+            _seriesAnimationProgress[seriesIndex] = 1.0;
+          }
+        }
+      }
+
+      accumulatedTimeMs += groupDuration + (sortedOrders.indexOf(order) < sortedOrders.length - 1 ? nextDelay : 0);
+    }
+
+    seriesDurationMs = accumulatedTimeMs;
+
+    // Calculate segment animation progress (for manual triggers, use actual trigger time)
+    final segmentConfigs = widget.style.segmentAnimationConfigs;
+    if (segmentConfigs.isNotEmpty) {
+      final sortedSegmentOrders = segmentConfigs.keys.toList()..sort();
+      int segmentAccumulatedTimeMs = 0;
+
+      for (final segmentOrder in sortedSegmentOrders) {
+        final config = segmentConfigs[segmentOrder]!;
+        final duration = config.duration?.inMilliseconds ?? widget.style.defaultSegmentAnimationDuration.inMilliseconds;
+
+        // For manual triggers, use wall-clock elapsed time; for auto triggers, use pre-calculated timeline
+        if (config.animationTrigger == AreaAnimationTrigger.manual) {
+          // Manual trigger: only animate if triggered, and calculate progress from wall-clock trigger time
+          if (!_manuallyTriggeredOrders.contains(segmentOrder)) {
+            _segmentAnimationProgress[segmentOrder] = 0.0;
+          } else if (_manualTriggerStartTime.containsKey(segmentOrder)) {
+            final elapsed = DateTime.now().difference(_manualTriggerStartTime[segmentOrder]!).inMilliseconds.toDouble();
+            if (elapsed <= duration) {
+              _segmentAnimationProgress[segmentOrder] = math.min(elapsed / duration, 1.0);
+            } else {
+              _segmentAnimationProgress[segmentOrder] = 1.0;
+            }
+          } else {
+            _segmentAnimationProgress[segmentOrder] = 0.0;
+          }
+        } else {
+          // Auto trigger: use pre-calculated timing
+          final segmentStartTimeMs = seriesDurationMs + segmentAccumulatedTimeMs;
+          final segmentEndTimeMs = segmentStartTimeMs + duration;
+
+          if (currentTimeMs >= segmentStartTimeMs && currentTimeMs <= segmentEndTimeMs) {
+            final segmentProgress = (currentTimeMs - segmentStartTimeMs) / duration;
+            _segmentAnimationProgress[segmentOrder] = math.min(segmentProgress, 1.0);
+          } else if (currentTimeMs > segmentEndTimeMs) {
+            _segmentAnimationProgress[segmentOrder] = 1.0;
+          } else {
+            _segmentAnimationProgress[segmentOrder] = 0.0;
+          }
+        }
+
+        // Add delay before next segment (only for auto triggers)
+        if (config.animationTrigger != AreaAnimationTrigger.manual) {
+          if (sortedSegmentOrders.indexOf(segmentOrder) < sortedSegmentOrders.length - 1) {
+            segmentAccumulatedTimeMs += duration + config.delayBeforeNext.inMilliseconds;
+          } else {
+            segmentAccumulatedTimeMs += duration;
+          }
+        }
+      }
+    }
+
+    // Check if any manual segments are still animating
+    bool hasActiveManualSegments = false;
+    for (final segmentOrder in _manuallyTriggeredOrders) {
+      if (_segmentAnimationProgress[segmentOrder] != null && _segmentAnimationProgress[segmentOrder]! < 1.0) {
+        hasActiveManualSegments = true;
+        break;
+      }
+    }
+
+    // Manage manual segment ticker
+    if (hasActiveManualSegments && _manualSegmentTicker == null) {
+      _manualSegmentTicker = createTicker((_) {
+        if (mounted) {
+          setState(() {
+            _updateAnimationProgress();
+          });
+        }
+      });
+      _manualSegmentTicker!.start();
+    } else if (!hasActiveManualSegments && _manualSegmentTicker != null) {
+      _manualSegmentTicker!.dispose();
+      _manualSegmentTicker = null;
+      // Force a final repaint to show the completed animation even if focus is elsewhere
+      // This ensures the final frame is rendered after the ticker stops
+      if (mounted) {
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+      }
+    }
+
+    // Update UI if animation is in progress or manual segments are active
+    if (mounted && (_controller.isAnimating || hasActiveManualSegments)) {
+      setState(() {});
+    }
+  }
+
+  /// Manually triggers animation for a specific animation order
+  ///
+  /// This is used for manual animation triggers where animations wait
+  /// for explicit triggers rather than automatic timing.
+  /// The animation starts from the exact moment this method is called.
+  ///
+  /// Example usage:
+  /// ```dart
+  /// final globalKey = GlobalKey<MaterialAreaChartState>();
+  /// // ... later in code
+  /// globalKey.currentState?.triggerAnimation(1);
+  /// ```
+  void triggerAnimation(int animationOrder) {
+    _manuallyTriggeredOrders.add(animationOrder);
+    // Record the wall-clock time when this segment was triggered
+    // This allows the segment to animate independently of the main animation controller
+    _manualTriggerStartTime[animationOrder] = DateTime.now();
+    _updateAnimationProgress();
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
     _controller.dispose(); // Dispose of the animation controller
+    _manualSegmentTicker?.dispose(); // Dispose of the manual segment ticker
     super.dispose();
   }
 
@@ -264,6 +551,8 @@ class _MaterialAreaChartState extends State<MaterialAreaChart> with SingleTicker
                             painter: AreaChartPainter(
                               series: widget.series,
                               progress: _animation.value,
+                              seriesAnimationProgress: _seriesAnimationProgress,
+                              segmentAnimationProgress: _segmentAnimationProgress,
                               style: widget.style,
                               tooltipPosition: _tooltipPosition,
                             ),
@@ -408,36 +697,36 @@ class _MaterialAreaChartState extends State<MaterialAreaChart> with SingleTicker
           borderRadius: BorderRadius.circular(tooltipStyle.borderRadius),
           color: Colors.transparent,
           child: Container(
-          constraints: BoxConstraints(
-            maxWidth: maxWidth,
-            maxHeight: maxHeight,
-          ),
-          decoration: BoxDecoration(
-            color: tooltipStyle.backgroundColor.withValues(
-              alpha: opacity * tooltipStyle.backgroundOpacity,
+            constraints: BoxConstraints(
+              maxWidth: maxWidth,
+              maxHeight: maxHeight,
             ),
-            borderRadius: BorderRadius.circular(tooltipStyle.borderRadius),
-            border: tooltipStyle.borderWidth > 0
-                ? Border.all(
-                    color: tooltipStyle.borderColor,
-                    width: tooltipStyle.borderWidth,
-                  )
-                : null,
-          ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(8),
-            child: Html(
-              data: _activeHtmlTooltip!.htmlContent,
-              style: {
-                "*": Style(
-                  margin: Margins.zero,
-                  padding: HtmlPaddings.zero,
-                  backgroundColor: Colors.transparent,
-                ),
-              },
+            decoration: BoxDecoration(
+              color: tooltipStyle.backgroundColor.withValues(
+                alpha: opacity * tooltipStyle.backgroundOpacity,
+              ),
+              borderRadius: BorderRadius.circular(tooltipStyle.borderRadius),
+              border: tooltipStyle.borderWidth > 0
+                  ? Border.all(
+                      color: tooltipStyle.borderColor,
+                      width: tooltipStyle.borderWidth,
+                    )
+                  : null,
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(8),
+              child: Html(
+                data: _activeHtmlTooltip!.htmlContent,
+                style: {
+                  "*": Style(
+                    margin: Margins.zero,
+                    padding: HtmlPaddings.zero,
+                    backgroundColor: Colors.transparent,
+                  ),
+                },
+              ),
             ),
           ),
-        ),
         ),
       ),
     );

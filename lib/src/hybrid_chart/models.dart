@@ -2,7 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
-import '../area_chart/models.dart' show TooltipConfig, AreaCrosshairConfig, TooltipStyleConfig, BaselineConfig;
+import '../area_chart/models.dart' show TooltipConfig, AreaCrosshairConfig, TooltipStyleConfig, BaselineConfig, AreaAnimationConfig, AreaAnimationType, AreaAnimationTrigger;
 import '../shared/shared_models.dart';
 
 /// Enum for y-axis position
@@ -59,7 +59,7 @@ class HybridChartData {
 
   /// Tooltip configuration
   final TooltipConfig? tooltipConfig;
-  
+
   /// When true, draw a vertical line at this data point's X position.
   /// Use this to force per-point vertical grid lines regardless of label presence.
   final bool? showVerticalLine;
@@ -68,6 +68,9 @@ class HybridChartData {
   /// Defaults to `HybridChartLabelDisplay.defaultDisplay` which preserves
   /// the chart's existing label-selection logic.
   final HybridChartLabelDisplay labelDisplay;
+
+  /// Segment animation group (0-based index).
+  final int segmentAnimationOrder;
 
   const HybridChartData({
     this.label = '',
@@ -80,6 +83,7 @@ class HybridChartData {
     this.tooltipConfig,
     this.showVerticalLine,
     this.labelDisplay = HybridChartLabelDisplay.defaultDisplay,
+    this.segmentAnimationOrder = 0,
   });
 
   /// Get the value for area chart display (uses the close price)
@@ -135,6 +139,7 @@ class HybridChartData {
       tooltipConfig: tooltipConfig,
       showVerticalLine: showVerticalLine,
       labelDisplay: labelDisplay,
+      segmentAnimationOrder: segmentAnimationOrder,
     );
   }
 }
@@ -148,6 +153,7 @@ class HybridChartSeries {
   final double? lineWidth; // Line width for area chart
   final bool? showPoints; // Show points for area chart
   final double? pointSize; // Point size for area chart
+  final AreaAnimationConfig? animationConfig; // Animation configuration for this series.
 
   const HybridChartSeries({
     required this.name,
@@ -157,6 +163,7 @@ class HybridChartSeries {
     this.lineWidth,
     this.showPoints,
     this.pointSize,
+    this.animationConfig,
   });
 
   /// Create from area chart series
@@ -177,6 +184,7 @@ class HybridChartSeries {
       lineWidth: lineWidth,
       showPoints: showPoints,
       pointSize: pointSize,
+      animationConfig: null,
     );
   }
 
@@ -192,6 +200,7 @@ class HybridChartSeries {
       dataPoints: dataPoints,
       color: bullishColor,
       gradientColor: bearishColor,
+      animationConfig: null,
     );
   }
 }
@@ -216,21 +225,27 @@ class HybridChartStyle {
   final Curve animationCurve;
   final EdgeInsets padding;
   final bool showGrid;
-    final int autoHorizontalGridLines;
-    final int autoVerticalGridLines;
+  final int autoHorizontalGridLines;
+  final int autoVerticalGridLines;
   final bool showVerticalLinesAtLabels;
   final String? xAxisTitle;
   final String? yAxisTitle;
+
   /// Optional text style for the X axis title
   final TextStyle? xAxisTitleStyle;
+
   /// Optional text style for the Y axis title
   final TextStyle? yAxisTitleStyle;
+
   /// Distance in pixels between the X axis line and the X axis title
   final double xAxisTitleGap;
+
   /// Distance in pixels between the Y axis line and the Y axis title
   final double yAxisTitleGap;
+
   /// Distance in pixels between the X axis line and the X axis labels
   final double xAxisLabelGap;
+
   /// Distance in pixels between the Y axis line and the Y axis labels
   final double yAxisLabelGap;
 
@@ -240,8 +255,10 @@ class HybridChartStyle {
 
   // Crosshair
   final AreaCrosshairConfig? crosshair;
+
   /// When true, only the vertical crosshair line is drawn (no horizontal line)
   final bool singleCrosshair;
+
   /// When `singleCrosshair` is true, choose which direction the single crosshair takes.
   final SingleCrosshairOrientation singleCrosshairOrientation;
 
@@ -267,35 +284,50 @@ class HybridChartStyle {
   final bool showVolume;
   final Color volumeBarColor;
   final double volumeBarOpacity;
+
   /// Width of each volume bar in pixels
   final double volumeBarWidth;
+
   /// Whether to show a small tooltip when hovering a volume bar
   final bool showVolumeTooltip;
+
   /// Background color for the volume tooltip
   final Color volumeTooltipBackgroundColor;
+
   /// Text color for the volume tooltip
   final Color volumeTooltipTextColor;
+
   /// Border radius for the volume tooltip box
   final double volumeTooltipBorderRadius;
+
   /// Opacity for the volume tooltip background (0.0 - 1.0)
   final double volumeTooltipOpacity;
+
   /// Fraction of the chart height allocated to volume bars (0.0 - 1.0)
   /// Multiplier applied to the chart area's height to determine the
   /// maximum drawable height for volume bars. Values > 1.0 are allowed
   /// and act as a multiplier (e.g. 2.0 makes the max bar height twice
   /// the chart area's height). Negative values are treated as 0.
   final double volumeBarHeightRatio;
+
   /// Fraction of the main chart area reserved for the volume area when
   /// `showVolumeBelowChart` is true. Keep this <= 0.5 to avoid crowding.
   final double volumeAreaHeightRatio;
+
   /// When true and `showVolume` is enabled, render the volume bars in a
   /// separate area below the main plotting area.
   final bool showVolumeBelowChart;
+
   /// Vertical offset (in pixels) applied to drawn volume bars. Positive
   /// values move the bars downward; negative values move them upward.
   final double volumeBarVerticalOffset;
   final TooltipStyleConfig? tooltipStyle;
   final BaselineConfig? baseline;
+  final AreaAnimationType defaultAnimationType; // Default animation type for areas.
+  final AreaAnimationTrigger defaultAnimationTrigger; // Default animation trigger for areas.
+  final Duration defaultDelayBeforeNext; // Default delay between sequential animations.
+  final Map<int, SegmentAnimationConfig> segmentAnimationConfigs; // Per-segment animation configs grouped by segmentAnimationOrder.
+  final Duration defaultSegmentAnimationDuration; // Default duration for segment animations.
 
   const HybridChartStyle({
     // Common
@@ -316,8 +348,8 @@ class HybridChartStyle {
     this.animationCurve = Curves.easeInOut,
     this.padding = const EdgeInsets.all(24),
     this.showGrid = true,
-      this.autoHorizontalGridLines = 5,
-      this.autoVerticalGridLines = 0,
+    this.autoHorizontalGridLines = 5,
+    this.autoVerticalGridLines = 0,
     this.showVerticalLinesAtLabels = false,
     this.xAxisTitle,
     this.yAxisTitle,
@@ -364,6 +396,11 @@ class HybridChartStyle {
     this.showVolumeBelowChart = false,
     this.tooltipStyle,
     this.baseline,
+    this.defaultAnimationType = AreaAnimationType.drawLine,
+    this.defaultAnimationTrigger = AreaAnimationTrigger.afterDelay,
+    this.defaultDelayBeforeNext = const Duration(milliseconds: 100),
+    this.segmentAnimationConfigs = const {},
+    this.defaultSegmentAnimationDuration = const Duration(milliseconds: 600),
   });
 
   /// Create a style combining the best of both area and candlestick
@@ -385,8 +422,8 @@ class HybridChartStyle {
     Curve? animationCurve,
     EdgeInsets? padding,
     bool? showGrid,
-      int? autoHorizontalGridLines,
-      int? autoVerticalGridLines,
+    int? autoHorizontalGridLines,
+    int? autoVerticalGridLines,
     bool? showVerticalLinesAtEveryLabels,
     String? xAxisTitle,
     String? yAxisTitle,
@@ -431,6 +468,11 @@ class HybridChartStyle {
     bool? showVolumeBelowChart,
     TooltipStyleConfig? tooltipStyle,
     BaselineConfig? baseline,
+    AreaAnimationType? defaultAnimationType,
+    AreaAnimationTrigger? defaultAnimationTrigger,
+    Duration? defaultDelayBeforeNext,
+    Map<int, SegmentAnimationConfig>? segmentAnimationConfigs,
+    Duration? defaultSegmentAnimationDuration,
   }) {
     return HybridChartStyle(
       colors: colors ?? const [Colors.blue, Colors.green, Colors.red],
@@ -450,10 +492,9 @@ class HybridChartStyle {
       animationCurve: animationCurve ?? Curves.easeInOut,
       padding: padding ?? const EdgeInsets.all(24),
       showGrid: showGrid ?? true,
-        autoHorizontalGridLines: autoHorizontalGridLines ?? 5,
-        autoVerticalGridLines: autoVerticalGridLines ?? 0,
+      autoHorizontalGridLines: autoHorizontalGridLines ?? 5,
+      autoVerticalGridLines: autoVerticalGridLines ?? 0,
       showVerticalLinesAtLabels: showVerticalLinesAtEveryLabels ?? false,
-      
       xAxisTitle: xAxisTitle,
       yAxisTitle: yAxisTitle,
       xAxisTitleStyle: xAxisTitleStyle,
@@ -497,6 +538,11 @@ class HybridChartStyle {
       showVolumeBelowChart: showVolumeBelowChart ?? false,
       tooltipStyle: tooltipStyle,
       baseline: baseline,
+      defaultAnimationType: defaultAnimationType ?? AreaAnimationType.drawLine,
+      defaultAnimationTrigger: defaultAnimationTrigger ?? AreaAnimationTrigger.afterDelay,
+      defaultDelayBeforeNext: defaultDelayBeforeNext ?? const Duration(milliseconds: 100),
+      segmentAnimationConfigs: segmentAnimationConfigs ?? const {},
+      defaultSegmentAnimationDuration: defaultSegmentAnimationDuration ?? const Duration(milliseconds: 600),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'models.dart';
 import 'painter.dart';
@@ -141,16 +142,22 @@ class MaterialPieChart extends StatefulWidget {
   }
 
   @override
-  State<MaterialPieChart> createState() => _MaterialPieChartState();
+  State<MaterialPieChart> createState() => MaterialPieChartState();
 }
 
-class _MaterialPieChartState extends State<MaterialPieChart>
-    with SingleTickerProviderStateMixin {
+class MaterialPieChartState extends State<MaterialPieChart>
+    with TickerProviderStateMixin {
   late AnimationController _controller; // Controls the animation.
   late Animation<double>
       _animation; // Represents the current progress of the animation.
   int?
       _hoveredSegmentIndex; // Holds the index of the currently hovered segment.
+  List<double> _sliceAnimationProgress = []; // Per-slice animation progress
+  final Set<int> _manuallyTriggeredOrders = {}; // Animation orders that have been manually triggered
+  final Map<int, DateTime> _manualTriggerStartTime = {}; // Tracks when each manual slice was triggered
+  final Set<int> _reversedAnimationOrders = {}; // Animation orders currently being reversed
+  final Map<int, DateTime> _reverseStartTime = {}; // Tracks when each reverse animation started
+  Ticker? _manualSliceTicker; // Separate ticker for updating manual slices
 
   @override
   void initState() {
@@ -160,9 +167,12 @@ class _MaterialPieChartState extends State<MaterialPieChart>
 
   /// Sets up the animation controller and its animation properties.
   void _setupAnimation() {
-    // Create an animation controller with a specified duration from the style.
+    // Calculate total animation duration based on slice animation configurations
+    final totalDuration = _calculateTotalAnimationDuration();
+    
+    // Create an animation controller with the calculated duration
     _controller = AnimationController(
-      duration: widget.style.animationDuration,
+      duration: totalDuration > Duration.zero ? totalDuration : widget.style.animationDuration,
       vsync: this, // Provides a TickerProvider for the animation.
     );
 
@@ -180,13 +190,328 @@ class _MaterialPieChartState extends State<MaterialPieChart>
         }
       });
 
-    _controller.forward(); // Start the animation.
+    // Listen to animation changes to update per-slice progress
+    _controller.addListener(() {
+      _updateSliceAnimationProgress();
+    });
+
+    // Initialize animation progress before first paint
+    _updateSliceAnimationProgress();
+
+    // Start the animation if slice animations are enabled
+    if (widget.style.sliceAnimationsEnabled) {
+      _controller.forward();
+    } else {
+      _controller.value = 1.0;
+      _updateSliceAnimationProgress();
+    }
+  }
+  
+  /// Calculates the total animation duration based on individual slice configurations
+  Duration _calculateTotalAnimationDuration() {
+    if (!widget.style.sliceAnimationsEnabled) {
+      return widget.style.animationDuration;
+    }
+    
+    int totalDurationMs = 0;
+    
+    // Group slices by animation order
+    final slicesByOrder = <int, List<int>>{};
+    
+    for (int i = 0; i < widget.data.length; i++) {
+      final config = widget.data[i].animationConfig;
+      final order = config?.animationOrder ?? 0;
+      
+      if (!slicesByOrder.containsKey(order)) {
+        slicesByOrder[order] = [];
+      }
+      slicesByOrder[order]!.add(i);
+    }
+    
+    // Sort orders
+    final sortedOrders = slicesByOrder.keys.toList()..sort();
+    
+    // Calculate timing for each order group
+    for (final order in sortedOrders) {
+      int groupDuration = 0;
+      int nextDelay = 0;
+      
+      // Find max duration in this order group
+      for (final sliceIndex in slicesByOrder[order]!) {
+        final config = widget.data[sliceIndex].animationConfig;
+        final duration = config?.duration?.inMilliseconds 
+            ?? widget.style.defaultSliceAnimationDuration.inMilliseconds;
+        groupDuration = max(groupDuration, duration);
+        
+        // Get delay for next animation
+        final trigger = config?.animationTrigger ?? widget.style.defaultSliceAnimationTrigger;
+        if (trigger == SliceAnimationTrigger.afterDelay) {
+          nextDelay = max(nextDelay, 
+              (config?.delayBeforeNext ?? widget.style.defaultDelayBeforeNext).inMilliseconds);
+        }
+      }
+      
+      totalDurationMs += groupDuration;
+      
+      // Only add delay if there are more orders to come
+      if (sortedOrders.indexOf(order) < sortedOrders.length - 1) {
+        totalDurationMs += nextDelay;
+      }
+    }
+    
+    // If no custom animations, use default duration
+    if (totalDurationMs == 0) {
+      return widget.style.animationDuration;
+    }
+    
+    return Duration(milliseconds: totalDurationMs);
+  }
+  
+  /// Updates per-slice animation progress based on the current animation value
+  void _updateSliceAnimationProgress() {
+    if (!widget.style.sliceAnimationsEnabled) {
+      _sliceAnimationProgress = List.filled(widget.data.length, 1.0);
+      return;
+    }
+    
+    final now = DateTime.now();
+    final totalDurationMs = _controller.duration!.inMilliseconds.toDouble();
+    final currentTimeMs = _controller.value * totalDurationMs;
+    
+    // Group slices by animation order
+    final slicesByOrder = <int, List<int>>{};
+    for (int i = 0; i < widget.data.length; i++) {
+      final config = widget.data[i].animationConfig;
+      final order = config?.animationOrder ?? 0;
+      
+      if (!slicesByOrder.containsKey(order)) {
+        slicesByOrder[order] = [];
+      }
+      slicesByOrder[order]!.add(i);
+    }
+    
+    final sortedOrders = slicesByOrder.keys.toList()..sort();
+    
+    // Initialize progress list
+    _sliceAnimationProgress = List.filled(widget.data.length, 0.0);
+    
+    var accumulatedTimeMs = 0.0;
+    
+    for (final order in sortedOrders) {
+      final slices = slicesByOrder[order]!;
+      
+      // Check if any slice in this order is manual
+      bool hasManualTrigger = false;
+      for (final sliceIndex in slices) {
+        final config = widget.data[sliceIndex].animationConfig;
+        final trigger = config?.animationTrigger ?? widget.style.defaultSliceAnimationTrigger;
+        if (trigger == SliceAnimationTrigger.manual) {
+          hasManualTrigger = true;
+          break;
+        }
+      }
+      
+      // If manual and not triggered, skip this order
+      if (hasManualTrigger && !_manuallyTriggeredOrders.contains(order)) {
+        accumulatedTimeMs += _getOrderDuration(order);
+        continue;
+      }
+      
+      // Calculate progress for slices in this order
+      final orderDuration = _getOrderDuration(order);
+      
+      for (final sliceIndex in slices) {
+        final config = widget.data[sliceIndex].animationConfig;
+        final trigger = config?.animationTrigger ?? widget.style.defaultSliceAnimationTrigger;
+        final sliceDuration = (config?.duration?.inMilliseconds 
+            ?? widget.style.defaultSliceAnimationDuration.inMilliseconds).toDouble();
+        
+        double progress = 0.0;
+        
+        if (trigger == SliceAnimationTrigger.manual && _manuallyTriggeredOrders.contains(order)) {
+          if (_reversedAnimationOrders.contains(order)) {
+            // Reverse animation: go from 1.0 back to 0.0
+            final reverseTime = _reverseStartTime[order];
+            if (reverseTime != null) {
+              final elapsedMs = now.difference(reverseTime).inMilliseconds.toDouble();
+              final reverseProgress = (elapsedMs / sliceDuration).clamp(0.0, 1.0);
+              progress = 1.0 - reverseProgress;
+              
+              // If reverse animation is complete, remove from tracking
+              if (reverseProgress >= 1.0) {
+                _manuallyTriggeredOrders.remove(order);
+                _manualTriggerStartTime.remove(order);
+                _reversedAnimationOrders.remove(order);
+                _reverseStartTime.remove(order);
+              }
+            }
+          } else {
+            // Forward animation: go from 0.0 to 1.0
+            final triggerTime = _manualTriggerStartTime[order];
+            if (triggerTime != null) {
+              final elapsedMs = now.difference(triggerTime).inMilliseconds.toDouble();
+              progress = (elapsedMs / sliceDuration).clamp(0.0, 1.0);
+            }
+          }
+        } else {
+          // Use animation controller time for auto animations
+          if (currentTimeMs >= accumulatedTimeMs) {
+            final timeIntoOrder = currentTimeMs - accumulatedTimeMs;
+            progress = (timeIntoOrder / sliceDuration).clamp(0.0, 1.0);
+          }
+        }
+        
+        _sliceAnimationProgress[sliceIndex] = progress;
+      }
+      
+      accumulatedTimeMs += orderDuration;
+      
+      // Add delay before next order if configured
+      for (final sliceIndex in slices) {
+        final config = widget.data[sliceIndex].animationConfig;
+        final trigger = config?.animationTrigger ?? widget.style.defaultSliceAnimationTrigger;
+        if (trigger == SliceAnimationTrigger.afterDelay) {
+          final delay = config?.delayBeforeNext?.inMilliseconds 
+              ?? widget.style.defaultDelayBeforeNext.inMilliseconds;
+          accumulatedTimeMs += delay.toDouble();
+          break; // Only add delay once per order
+        }
+      }
+    }
+    
+    // Start manual ticker if we have any active manual animations or reverse animations
+    bool hasActiveManualAnimations = false;
+    
+    // Check for active forward animations
+    for (final order in _manuallyTriggeredOrders) {
+      if (!_reversedAnimationOrders.contains(order) && slicesByOrder.containsKey(order)) {
+        for (final sliceIndex in slicesByOrder[order]!) {
+          if (_sliceAnimationProgress[sliceIndex] < 1.0) {
+            hasActiveManualAnimations = true;
+            break;
+          }
+        }
+      }
+    }
+    
+    // Check for active reverse animations
+    if (!hasActiveManualAnimations) {
+      for (final order in _reversedAnimationOrders) {
+        if (slicesByOrder.containsKey(order)) {
+          for (final sliceIndex in slicesByOrder[order]!) {
+            if (_sliceAnimationProgress[sliceIndex] > 0.0) {
+              hasActiveManualAnimations = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    if (hasActiveManualAnimations && _manualSliceTicker == null) {
+      _manualSliceTicker = createTicker((elapsed) {
+        if (mounted) {
+          setState(() {
+            _updateSliceAnimationProgress();
+          });
+        }
+      });
+      _manualSliceTicker!.start();
+    } else if (!hasActiveManualAnimations && _manualSliceTicker != null) {
+      _manualSliceTicker!.dispose();
+      _manualSliceTicker = null;
+      // Force a final repaint to show the completed animation even if focus is elsewhere
+      // This ensures the final frame is rendered after the ticker stops
+      if (mounted) {
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+      }
+    }
+  }
+  
+  /// Gets the duration for a specific animation order
+  double _getOrderDuration(int order) {
+    double maxDuration = 0.0;
+    
+    for (int i = 0; i < widget.data.length; i++) {
+      final config = widget.data[i].animationConfig;
+      if ((config?.animationOrder ?? 0) == order) {
+        final duration = config?.duration?.inMilliseconds.toDouble() 
+            ?? widget.style.defaultSliceAnimationDuration.inMilliseconds.toDouble();
+        maxDuration = max(maxDuration, duration);
+      }
+    }
+    
+    return maxDuration;
+  }
+  
+  /// Triggers animation for a specific animation order.
+  /// 
+  /// This method marks the given [animationOrder] as manually triggered,
+  /// allowing animations with [SliceAnimationTrigger.manual] type to start.
+  /// Animations respect order dependencies - an animation won't start
+  /// until all previous orders have completed.
+  /// 
+  /// Example:
+  /// ```dart
+  /// final globalKey = GlobalKey<MaterialPieChartState>();
+  /// 
+  /// // In your chart widget
+  /// MaterialPieChart(
+  ///   key: globalKey,
+  ///   data: [...],
+  ///   style: [...],
+  /// )
+  /// 
+  /// // Trigger animation order 0
+  /// globalKey.currentState?.triggerAnimation(0);
+  /// ```
+  void triggerAnimation(int animationOrder) {
+    _manuallyTriggeredOrders.add(animationOrder);
+    
+    // Record the wall clock time when this slice was triggered
+    _manualTriggerStartTime[animationOrder] = DateTime.now();
+    
+    // Immediately update to detect the new manual slice and start the ticker
+    _updateSliceAnimationProgress();
+    
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// Resets (reverses) a manually triggered animation with a smooth animation.
+  /// 
+  /// This smoothly animates the slice back to its original state, making it
+  /// disappear gradually over the same duration as the forward animation.
+  /// 
+  /// Example:
+  /// ```dart
+  /// // Reset animation order 0
+  /// globalKey.currentState?.resetAnimation(0);
+  /// ```
+  void resetAnimation(int animationOrder) {
+    // Only reverse if this animation order was actually triggered
+    if (_manuallyTriggeredOrders.contains(animationOrder)) {
+      _reversedAnimationOrders.add(animationOrder);
+      _reverseStartTime[animationOrder] = DateTime.now();
+      
+      // Update to start the reverse animation
+      _updateSliceAnimationProgress();
+      
+      if (mounted) {
+        setState(() {});
+      }
+    }
   }
 
   @override
   void dispose() {
-    _controller
-        .dispose(); // Dispose of the animation controller when the widget is removed.
+    _controller.dispose();
+    _manualSliceTicker?.dispose();
     super.dispose();
   }
 
@@ -358,6 +683,7 @@ class _MaterialPieChartState extends State<MaterialPieChart>
                   hoveredSegmentIndex:
                       _hoveredSegmentIndex, // Pass the index of the hovered segment.
                   chartRadius: widget.chartRadius, // Pass the chart radius
+                  sliceAnimationProgress: _sliceAnimationProgress, // Pass per-slice animation progress
                 ),
               );
             },

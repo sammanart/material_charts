@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:material_charts/src/shared/shared_models.dart';
 
 import 'models.dart';
 
@@ -27,6 +28,14 @@ class MultiLineChartPainter extends CustomPainter {
   /// The offset applied for panning the chart.
   final Offset panOffset;
 
+  /// Per-line animation progress values (0.0 to 1.0).
+  /// Each entry corresponds to the animation progress for that line series.
+  final List<double> lineAnimationProgress;
+
+  /// Per-segment animation progress values (0.0 to 1.0).
+  /// Keyed by segmentAnimationOrder for tracking individual segment animations.
+  final Map<int, double> segmentAnimationProgress;
+
   /// Constructs a [MultiLineChartPainter] with the required series and style, and optional parameters.
   MultiLineChartPainter({
     required this.series,
@@ -35,6 +44,8 @@ class MultiLineChartPainter extends CustomPainter {
     this.crosshairPosition,
     this.scale = 1.0,
     this.panOffset = Offset.zero,
+    this.lineAnimationProgress = const [],
+    this.segmentAnimationProgress = const {},
   });
 
   /// Paints the chart on the given canvas with the specified size.
@@ -229,6 +240,10 @@ class MultiLineChartPainter extends CustomPainter {
   }
 
   /// Draws all the series lines and points on the canvas.
+  /// 
+  /// This implementation supports progressive segment rendering:
+  /// - Segments with explicit animation configs are drawn during their segment animation phase
+  /// - Segments without explicit configs are drawn during the line animation phase
   void _drawSeries(Canvas canvas, Rect chartArea) {
     for (int i = 0; i < series.length; i++) {
       final seriesData = series[i];
@@ -236,11 +251,73 @@ class MultiLineChartPainter extends CustomPainter {
       final showPoints = seriesData.showPoints ?? style.showPoints;
       final smoothLine = seriesData.smoothLine ?? style.smoothLines;
       final lineWidth = seriesData.lineWidth ?? style.defaultLineWidth;
+      
+      // Get per-line animation progress
+      final lineProgress = i < lineAnimationProgress.length
+          ? lineAnimationProgress[i]
+          : (style.animation.enabled ? 0.0 : 1.0);
 
-      _drawLine(canvas, chartArea, seriesData, color, lineWidth, smoothLine);
+      // Get animation config for this line
+      final animationConfig = seriesData.animationConfig;
+      final animationType = animationConfig?.animationType ?? style.defaultAnimationType;
 
-      if (showPoints) {
-        _drawPoints(canvas, chartArea, seriesData, color);
+      // Group data points by segmentAnimationOrder
+      final segmentGroups = <int, List<int>>{};
+      for (int j = 0; j < seriesData.dataPoints.length; j++) {
+        final point = seriesData.dataPoints[j];
+        final segmentOrder = point.segmentAnimationOrder;
+        if (!segmentGroups.containsKey(segmentOrder)) {
+          segmentGroups[segmentOrder] = [];
+        }
+        segmentGroups[segmentOrder]!.add(j);
+      }
+
+      final sortedOrders = segmentGroups.keys.toList()..sort();
+      
+      // Draw each segment group based on whether it has explicit animation config
+      for (final segmentOrder in sortedOrders) {
+        final indices = segmentGroups[segmentOrder]!;
+        if (indices.isEmpty) continue;
+        
+        // Check if this segment has explicit animation config
+        final hasSegmentConfig = style.segmentAnimationConfigs.containsKey(segmentOrder);
+        
+        if (hasSegmentConfig) {
+          // Draw with segment animation (only during segment phase)
+          final segmentProgress = segmentAnimationProgress[segmentOrder] ?? 0.0;
+          if (segmentProgress > 0.001) {
+            _drawSegmentGroup(
+              canvas, 
+              chartArea, 
+              seriesData, 
+              indices, 
+              color, 
+              lineWidth, 
+              smoothLine, 
+              showPoints,
+              segmentProgress,
+              segmentOrder,
+            );
+          }
+        } else {
+          // Draw with line animation (default behavior for segments without explicit config)
+          if (lineProgress > 0.0) {
+            _drawSegmentGroup(
+              canvas, 
+              chartArea, 
+              seriesData, 
+              indices, 
+              color, 
+              lineWidth, 
+              smoothLine, 
+              showPoints,
+              lineProgress,
+              segmentOrder,
+              useLineAnimation: true,
+              lineAnimationType: animationType,
+            );
+          }
+        }
       }
     }
   }
@@ -371,54 +448,6 @@ class MultiLineChartPainter extends CustomPainter {
     }
   }
 
-  /// Draws a line on the canvas for the given series data with specified styling.
-  /// Supports smooth and straight line rendering.
-  void _drawLine(
-    Canvas canvas,
-    Rect chartArea,
-    ChartSeries seriesData,
-    Color color,
-    double lineWidth,
-    bool smoothLine,
-  ) {
-    final linePaint = Paint()
-      ..color = color // Set color for the line
-      ..strokeWidth = lineWidth // Set width for the line
-      ..strokeCap = StrokeCap.round // Set line cap to round
-      ..strokeJoin = StrokeJoin.round // Set line join to round
-      ..style = PaintingStyle.stroke; // Set paint style to stroke
-
-    final path = Path(); // Create a new path for the line
-    final points = _getSeriesPoints(
-      chartArea,
-      seriesData,
-    ); // Get calculated points for the series
-
-    if (points.isEmpty) return; // Exit if there are no points to draw
-
-    // Choose the appropriate line drawing method based on smoothLine flag
-    if (smoothLine) {
-      _drawSmoothLine(path, points); // Draw smooth line
-    } else {
-      _drawStraightLine(path, points); // Draw straight line
-    }
-
-    // Apply animation progress to the path
-    final pathMetrics = path
-        .computeMetrics()
-        .first; // Get the path metrics for the animated path
-    final animatedPath = pathMetrics.extractPath(
-      0.0,
-      pathMetrics.length *
-          progress, // Calculate length of the animated path based on progress
-    );
-
-    canvas.drawPath(
-      animatedPath,
-      linePaint,
-    ); // Draw the animated path on the canvas
-  }
-
   /// Draws a straight line connecting the given points in the path.
   void _drawStraightLine(Path path, List<Offset> points) {
     path.moveTo(points.first.dx, points.first.dy); // Move to the first point
@@ -462,44 +491,159 @@ class MultiLineChartPainter extends CustomPainter {
     }
   }
 
-  /// Draws points on the canvas for the specified series data, including a border around each point.
-  void _drawPoints(
+  /// Draws a single segment group with animation.
+  /// 
+  /// This unified method handles both line-animation-phase and segment-animation-phase rendering.
+  /// When useLineAnimation is true, applies line-level animation effects.
+  /// When false, applies segment-level animation effects.
+  void _drawSegmentGroup(
     Canvas canvas,
     Rect chartArea,
     ChartSeries seriesData,
+    List<int> indices,
     Color color,
-  ) {
-    final pointPaint = Paint()
-      ..color = color // Set color for the points
-      ..style = PaintingStyle.fill; // Set paint style to fill
+    double lineWidth,
+    bool smoothLine,
+    bool showPoints,
+    double progress,
+    int segmentOrder, {
+    bool useLineAnimation = false,
+    LineAnimationType? lineAnimationType,
+  }) {
+    final points = _getSeriesPoints(chartArea, seriesData);
+    if (points.isEmpty || indices.isEmpty) return;
 
-    final points = _getSeriesPoints(
-      chartArea,
-      seriesData,
-    ); // Get calculated points for the series
-    final progressPoints = (points.length * progress)
-        .floor(); // Calculate number of points to draw based on progress
-    final pointSize = seriesData.pointSize ??
-        style.defaultPointSize; // Get point size, default if not specified
-
-    for (int i = 0; i < progressPoints; i++) {
-      canvas.drawCircle(
-        points[i],
-        pointSize,
-        pointPaint,
-      ); // Draw the filled point
-
-      // Draw white border around points
-      final borderPaint = Paint()
-        ..color = style.backgroundColor // Set border color to background color
-        ..style = PaintingStyle.stroke // Set paint style to stroke
-        ..strokeWidth = 2; // Set border width
-      canvas.drawCircle(
-        points[i],
-        pointSize,
-        borderPaint,
-      ); // Draw the border around the point
+    // Get start and end indices for this segment
+    int startIdx = indices.first;
+    final endIdx = indices.last;
+    
+    // For segment animations (not line animation), connect to previous segment's last point
+    // This ensures continuity when revealing new segments progressively
+    if (!useLineAnimation && startIdx > 0) {
+      startIdx = startIdx - 1; // Include previous point to connect the line
     }
+    
+    final segmentPoints = points.sublist(startIdx, endIdx + 1);
+    
+    if (segmentPoints.length < 2) return;
+
+    // Determine animation effects based on phase
+    double opacity = 1.0;
+    double offsetY = 0.0;
+    bool shouldDrawProgressively = true;
+
+    if (useLineAnimation) {
+      // Apply line animation effects
+      final animType = lineAnimationType ?? LineAnimationType.drawLine;
+      if (animType == LineAnimationType.fadeIn) {
+        opacity = progress;
+        shouldDrawProgressively = false;
+      } else if (animType == LineAnimationType.slideUp) {
+        opacity = progress;
+        offsetY = (1.0 - progress) * 20.0;
+        shouldDrawProgressively = false;
+      }
+    } else {
+      // Apply segment animation effects
+      final segmentConfig = style.segmentAnimationConfigs[segmentOrder];
+      if (segmentConfig != null) {
+        final animType = segmentConfig.animationType;
+        if (animType == SegmentAnimationType.fadeIn) {
+          opacity = progress;
+          shouldDrawProgressively = false;
+        } else if (animType == SegmentAnimationType.slideUp) {
+          opacity = progress;
+          offsetY = (1.0 - progress) * 20.0;
+          shouldDrawProgressively = false;
+        }
+        // drawPoint means progressive drawing
+      }
+    }
+
+    // Early exit for zero progress/opacity
+    if (shouldDrawProgressively && progress <= 0.0) return;
+    if (!shouldDrawProgressively && opacity <= 0.0) return;
+
+    // Create path for this segment
+    final path = Path();
+    if (smoothLine) {
+      _drawSmoothLine(path, segmentPoints);
+    } else {
+      _drawStraightLine(path, segmentPoints);
+    }
+
+    // Apply animation progress to the path
+    Path displayPath = path;
+    if (shouldDrawProgressively) {
+      final metricIterator = path.computeMetrics().iterator;
+      if (!metricIterator.moveNext()) return;
+
+      final metric = metricIterator.current;
+      final clampedProgress = progress.clamp(0.0, 1.0);
+      displayPath = metric.extractPath(0.0, metric.length * clampedProgress);
+    }
+
+    // Draw the segment line
+    final linePaint = Paint()
+      ..color = color.withValues(alpha: opacity)
+      ..strokeWidth = lineWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+
+    canvas.save();
+    if (offsetY != 0.0) {
+      canvas.translate(0, offsetY);
+    }
+    
+    canvas.drawPath(displayPath, linePaint);
+    
+    // Draw points for this segment
+    if (showPoints) {
+      final pointSize = seriesData.pointSize ?? style.defaultPointSize;
+      final pointPaint = Paint()
+        ..color = color.withValues(alpha: opacity)
+        ..style = PaintingStyle.fill;
+      
+      final borderPaint = Paint()
+        ..color = style.backgroundColor.withValues(alpha: opacity)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+      
+      if (shouldDrawProgressively) {
+        // Calculate cumulative distances to each point in the segment
+        final distancesToPoints = <double>[0.0];
+        double cumulativeDist = 0.0;
+        for (int i = 0; i < segmentPoints.length - 1; i++) {
+          final p1 = segmentPoints[i];
+          final p2 = segmentPoints[i + 1];
+          cumulativeDist += (p2 - p1).distance;
+          distancesToPoints.add(cumulativeDist);
+        }
+        
+        final totalDist = cumulativeDist > 0 ? cumulativeDist : 1.0;
+        final drawnDistance = totalDist * progress;
+        
+        // Show points progressively as line reaches them
+        for (int i = 0; i < segmentPoints.length; i++) {
+          // For segment animations, always show the first point (connecting point from previous segment)
+          // For other points, show when line reaches them
+          final isConnectingPoint = !useLineAnimation && i == 0;
+          if (isConnectingPoint || drawnDistance >= distancesToPoints[i]) {
+            canvas.drawCircle(segmentPoints[i], pointSize, pointPaint);
+            canvas.drawCircle(segmentPoints[i], pointSize, borderPaint);
+          }
+        }
+      } else {
+        // Show all points with opacity effect
+        for (final point in segmentPoints) {
+          canvas.drawCircle(point, pointSize, pointPaint);
+          canvas.drawCircle(point, pointSize, borderPaint);
+        }
+      }
+    }
+    
+    canvas.restore();
   }
 
   /// Draws the legend on the canvas based on the series data and style settings.
@@ -855,6 +999,10 @@ class MultiLineChartPainter extends CustomPainter {
             crosshairPosition || // Check if crosshair position has changed
         oldDelegate.scale != scale || // Check if the scale has changed
         oldDelegate.panOffset !=
-            panOffset; // Check if the pan offset has changed
+            panOffset || // Check if the pan offset has changed
+        oldDelegate.lineAnimationProgress !=
+            lineAnimationProgress || // Check if per-line animation progress has changed
+        oldDelegate.segmentAnimationProgress !=
+            segmentAnimationProgress; // Check if per-segment animation progress has changed
   }
 }

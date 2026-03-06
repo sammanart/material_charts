@@ -1,9 +1,11 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:intl/intl.dart';
 
+import '../area_chart/models.dart' show AreaAnimationTrigger;
 import '../shared/shared_models.dart';
 import 'models.dart';
 import 'painter.dart';
@@ -34,6 +36,7 @@ class MaterialHybridChart extends StatefulWidget {
   final double hoverPointScale;
   final bool showPointTooltipOnHover;
   final bool showDragTooltip;
+
   /// When true and `style.showVolume` is enabled, render the volume bars
   /// in a separate area below the main plotting area instead of inside
   /// the main chart area.
@@ -69,10 +72,16 @@ class MaterialHybridChart extends StatefulWidget {
   State<MaterialHybridChart> createState() => _MaterialHybridChartState();
 }
 
-class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTickerProviderStateMixin {
+class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
   late HybridChartType _currentChartType;
+  List<double> _seriesAnimationProgress = [];
+  Map<int, double> _segmentAnimationProgress = {};
+  final Set<int> _manuallyTriggeredOrders = {};
+  final Map<int, DateTime> _manualTriggerStartTime = {};
+  final Set<int> _reverseAnimatingOrders = {};
+  Ticker? _manualSegmentTicker;
   double _scrollOffset = 0.0;
   Offset? _hoverPosition;
   KeyEventData? _activeHtmlTooltip;
@@ -91,8 +100,10 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
   }
 
   void _setupAnimation() {
+    final totalDuration = _calculateTotalAnimationDuration();
+
     _controller = AnimationController(
-      duration: widget.style.animationDuration,
+      duration: totalDuration,
       vsync: this,
     );
 
@@ -104,7 +115,325 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
         }
       });
 
+    _controller.addListener(() {
+      _updateAnimationProgress();
+    });
+
+    _updateAnimationProgress();
+
     _controller.forward();
+  }
+
+  Duration _calculateTotalAnimationDuration() {
+    int seriesDurationMs = 0;
+    int segmentDurationMs = 0;
+
+    final seriesByOrder = <int, List<int>>{};
+    for (int i = 0; i < widget.series.length; i++) {
+      final config = widget.series[i].animationConfig;
+      final order = config?.animationOrder ?? 0;
+
+      if (!seriesByOrder.containsKey(order)) {
+        seriesByOrder[order] = [];
+      }
+      seriesByOrder[order]!.add(i);
+    }
+
+    final sortedOrders = seriesByOrder.keys.toList()..sort();
+
+    for (final order in sortedOrders) {
+      int groupDuration = 0;
+      int nextDelay = 0;
+
+      for (final seriesIndex in seriesByOrder[order]!) {
+        final config = widget.series[seriesIndex].animationConfig;
+        final duration = config?.duration?.inMilliseconds ?? widget.style.animationDuration.inMilliseconds;
+        groupDuration = max(groupDuration, duration);
+
+        final trigger = config?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+        if (trigger == AreaAnimationTrigger.afterDelay) {
+          nextDelay = max(nextDelay, (config?.delayBeforeNext ?? widget.style.defaultDelayBeforeNext).inMilliseconds);
+        }
+      }
+
+      seriesDurationMs += groupDuration;
+
+      if (sortedOrders.indexOf(order) < sortedOrders.length - 1) {
+        seriesDurationMs += nextDelay;
+      }
+    }
+
+    if (seriesDurationMs == 0) {
+      seriesDurationMs = widget.style.animationDuration.inMilliseconds;
+    }
+
+    final segmentConfigs = widget.style.segmentAnimationConfigs;
+    if (segmentConfigs.isNotEmpty) {
+      final sortedSegmentOrders = segmentConfigs.keys.toList()..sort();
+
+      for (final segmentOrder in sortedSegmentOrders) {
+        final config = segmentConfigs[segmentOrder]!;
+        if (config.animationTrigger != AreaAnimationTrigger.manual) {
+          final duration = config.duration?.inMilliseconds ?? widget.style.defaultSegmentAnimationDuration.inMilliseconds;
+          segmentDurationMs += duration;
+
+          if (sortedSegmentOrders.indexOf(segmentOrder) < sortedSegmentOrders.length - 1) {
+            segmentDurationMs += config.delayBeforeNext.inMilliseconds;
+          }
+        }
+      }
+    }
+
+    final totalMilliseconds = seriesDurationMs + segmentDurationMs;
+    return Duration(milliseconds: max(totalMilliseconds, 100));
+  }
+
+  void _updateAnimationProgress() {
+    _seriesAnimationProgress = List<double>.filled(widget.series.length, 0.0);
+    _segmentAnimationProgress = {};
+
+    final controllerDurationMs = _controller.duration?.inMilliseconds ?? 0;
+    final currentTimeMs = _controller.value * controllerDurationMs;
+
+    int seriesDurationMs = 0;
+
+    final seriesByOrder = <int, List<int>>{};
+    for (int i = 0; i < widget.series.length; i++) {
+      final config = widget.series[i].animationConfig;
+      final order = config?.animationOrder ?? 0;
+
+      if (!seriesByOrder.containsKey(order)) {
+        seriesByOrder[order] = [];
+      }
+      seriesByOrder[order]!.add(i);
+    }
+
+    final sortedOrders = seriesByOrder.keys.toList()..sort();
+    int accumulatedTimeMs = 0;
+
+    for (final order in sortedOrders) {
+      int groupDuration = 0;
+      int nextDelay = 0;
+
+      for (final seriesIndex in seriesByOrder[order]!) {
+        final config = widget.series[seriesIndex].animationConfig;
+        final duration = config?.duration?.inMilliseconds ?? widget.style.animationDuration.inMilliseconds;
+        groupDuration = max(groupDuration, duration);
+
+        final trigger = config?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+        if (trigger == AreaAnimationTrigger.afterDelay) {
+          nextDelay = max(nextDelay, (config?.delayBeforeNext ?? widget.style.defaultDelayBeforeNext).inMilliseconds);
+        }
+      }
+
+      final groupStartTimeMs = accumulatedTimeMs;
+      final groupEndTimeMs = accumulatedTimeMs + groupDuration;
+
+      for (final seriesIndex in seriesByOrder[order]!) {
+        final config = widget.series[seriesIndex].animationConfig;
+        final trigger = config?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+        final duration = config?.duration?.inMilliseconds ?? widget.style.animationDuration.inMilliseconds;
+
+        if (trigger == AreaAnimationTrigger.manual) {
+          // For manual triggers, use elapsed time since trigger was called
+          if (!_manuallyTriggeredOrders.contains(order)) {
+            _seriesAnimationProgress[seriesIndex] = 0.0; // Not triggered yet
+          } else if (_manualTriggerStartTime.containsKey(order)) {
+            final elapsed = DateTime.now().difference(_manualTriggerStartTime[order]!).inMilliseconds.toDouble();
+            if (_reverseAnimatingOrders.contains(order)) {
+              // Reverse animation: start from 1.0 and go to 0.0
+              if (elapsed <= duration) {
+                _seriesAnimationProgress[seriesIndex] = (1.0 - (elapsed / duration)).clamp(0.0, 1.0);
+              } else {
+                _seriesAnimationProgress[seriesIndex] = 0.0;
+              }
+            } else {
+              // Forward animation: start from 0.0 and go to 1.0
+              if (elapsed <= duration) {
+                _seriesAnimationProgress[seriesIndex] = (elapsed / duration).clamp(0.0, 1.0);
+              } else {
+                _seriesAnimationProgress[seriesIndex] = 1.0;
+              }
+            }
+          } else {
+            _seriesAnimationProgress[seriesIndex] = 0.0;
+          }
+        } else {
+          // For automatic triggers, use main controller time
+          if (currentTimeMs >= groupStartTimeMs && currentTimeMs <= groupEndTimeMs) {
+            final seriesProgress = (currentTimeMs - groupStartTimeMs) / groupDuration;
+            _seriesAnimationProgress[seriesIndex] = seriesProgress.clamp(0.0, 1.0);
+          } else if (currentTimeMs > groupEndTimeMs) {
+            _seriesAnimationProgress[seriesIndex] = 1.0;
+          }
+        }
+      }
+
+      accumulatedTimeMs += groupDuration + (sortedOrders.indexOf(order) < sortedOrders.length - 1 ? nextDelay : 0);
+    }
+
+    seriesDurationMs = accumulatedTimeMs;
+
+    final segmentConfigs = widget.style.segmentAnimationConfigs;
+    if (segmentConfigs.isNotEmpty) {
+      final sortedSegmentOrders = segmentConfigs.keys.toList()..sort();
+      int segmentAccumulatedTimeMs = 0;
+
+      for (final segmentOrder in sortedSegmentOrders) {
+        final config = segmentConfigs[segmentOrder]!;
+        final duration = config.duration?.inMilliseconds ?? widget.style.defaultSegmentAnimationDuration.inMilliseconds;
+
+        if (config.animationTrigger == AreaAnimationTrigger.manual) {
+          if (!_manuallyTriggeredOrders.contains(segmentOrder)) {
+            _segmentAnimationProgress[segmentOrder] = 0.0;
+          } else if (_manualTriggerStartTime.containsKey(segmentOrder)) {
+            final elapsed = DateTime.now().difference(_manualTriggerStartTime[segmentOrder]!).inMilliseconds.toDouble();
+            if (_reverseAnimatingOrders.contains(segmentOrder)) {
+              // Reverse animation: start from 1.0 and go to 0.0
+              if (elapsed <= duration) {
+                _segmentAnimationProgress[segmentOrder] = (1.0 - (elapsed / duration)).clamp(0.0, 1.0);
+              } else {
+                _segmentAnimationProgress[segmentOrder] = 0.0;
+              }
+            } else {
+              // Forward animation: start from 0.0 and go to 1.0
+              if (elapsed <= duration) {
+                _segmentAnimationProgress[segmentOrder] = (elapsed / duration).clamp(0.0, 1.0);
+              } else {
+                _segmentAnimationProgress[segmentOrder] = 1.0;
+              }
+            }
+          } else {
+            _segmentAnimationProgress[segmentOrder] = 0.0;
+          }
+        } else {
+          final segmentStartTimeMs = seriesDurationMs + segmentAccumulatedTimeMs;
+          final segmentEndTimeMs = segmentStartTimeMs + duration;
+
+          if (currentTimeMs >= segmentStartTimeMs && currentTimeMs <= segmentEndTimeMs) {
+            final segmentProgress = (currentTimeMs - segmentStartTimeMs) / duration;
+            _segmentAnimationProgress[segmentOrder] = segmentProgress.clamp(0.0, 1.0);
+          } else if (currentTimeMs > segmentEndTimeMs) {
+            _segmentAnimationProgress[segmentOrder] = 1.0;
+          } else {
+            _segmentAnimationProgress[segmentOrder] = 0.0;
+          }
+        }
+
+        if (config.animationTrigger != AreaAnimationTrigger.manual) {
+          if (sortedSegmentOrders.indexOf(segmentOrder) < sortedSegmentOrders.length - 1) {
+            segmentAccumulatedTimeMs += duration + config.delayBeforeNext.inMilliseconds;
+          } else {
+            segmentAccumulatedTimeMs += duration;
+          }
+        }
+      }
+    }
+
+    bool hasActiveManualSegments = false;
+    for (final segmentOrder in _manuallyTriggeredOrders) {
+        if (_reverseAnimatingOrders.contains(segmentOrder) ||
+          (_segmentAnimationProgress[segmentOrder] != null && _segmentAnimationProgress[segmentOrder]! < 1.0)) {
+        hasActiveManualSegments = true;
+        break;
+      }
+    }
+
+    // Also check for active manual series animations
+    bool hasActiveManualSeries = false;
+    for (final seriesOrder in _manuallyTriggeredOrders) {
+      if (_seriesAnimationProgress.isNotEmpty) {
+        for (int i = 0; i < widget.series.length; i++) {
+          final config = widget.series[i].animationConfig;
+          final order = config?.animationOrder ?? 0;
+          if (order == seriesOrder && (_reverseAnimatingOrders.contains(order) || _seriesAnimationProgress[i] < 1.0)) {
+            hasActiveManualSeries = true;
+            break;
+          }
+        }
+        if (hasActiveManualSeries) break;
+      }
+    }
+
+    bool hasActiveManualAnimations = hasActiveManualSegments || hasActiveManualSeries;
+
+    if (hasActiveManualAnimations && _manualSegmentTicker == null) {
+      _manualSegmentTicker = createTicker((_) {
+        if (mounted) {
+          setState(() {
+            _updateAnimationProgress();
+          });
+        }
+      });
+      _manualSegmentTicker!.start();
+    } else if (!hasActiveManualAnimations && _manualSegmentTicker != null) {
+      _manualSegmentTicker!.dispose();
+      _manualSegmentTicker = null;
+      if (mounted) {
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {});
+          }
+        });
+      }
+    }
+
+    if (mounted && (_controller.isAnimating || hasActiveManualAnimations)) {
+      setState(() {});
+    }
+  }
+
+  void triggerAnimation(int animationOrder) {
+    _manuallyTriggeredOrders.add(animationOrder);
+    _manualTriggerStartTime[animationOrder] = DateTime.now();
+    _reverseAnimatingOrders.remove(animationOrder);
+    _updateAnimationProgress();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// Start reversing an animation that is currently playing forward.
+  /// The animation will play backwards at the same speed.
+  /// 
+  /// Example usage:
+  /// ```dart
+  /// final globalKey = GlobalKey<MaterialHybridChartState>();
+  /// // ... later in code to reverse animation for segment 1
+  /// globalKey.currentState?.reverseAnimation(1);
+  /// ```
+  void reverseAnimation(int animationOrder) {
+    if (!_manuallyTriggeredOrders.contains(animationOrder)) {
+      // If not triggered yet, trigger it first
+      _manuallyTriggeredOrders.add(animationOrder);
+    }
+    _reverseAnimatingOrders.add(animationOrder);
+    _manualTriggerStartTime[animationOrder] = DateTime.now();
+    _updateAnimationProgress();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// Reset an animation to its starting state (progress = 0.0).
+  /// This stops any ongoing animation and clears the triggered state.
+  /// 
+  /// Example usage:
+  /// ```dart
+  /// final globalKey = GlobalKey<MaterialHybridChartState>();
+  /// // ... later in code to reset animation for segment 1
+  /// globalKey.currentState?.resetAnimation(1);
+  /// ```
+  void resetAnimation(int animationOrder) {
+    _manuallyTriggeredOrders.remove(animationOrder);
+    _reverseAnimatingOrders.remove(animationOrder);
+    _manualTriggerStartTime.remove(animationOrder);
+    _seriesAnimationProgress.fillRange(0, _seriesAnimationProgress.length, 0.0);
+    _segmentAnimationProgress[animationOrder] = 0.0;
+    _updateAnimationProgress();
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _scrollToEnd() {
@@ -130,10 +459,16 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
   @override
   void didUpdateWidget(covariant MaterialHybridChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If animation duration or curve changed, update controller
-    if (oldWidget.style.animationDuration != widget.style.animationDuration ||
-        oldWidget.style.animationCurve != widget.style.animationCurve) {
-      _controller.duration = widget.style.animationDuration;
+    final shouldResetAnimation = oldWidget.style.animationDuration != widget.style.animationDuration ||
+        oldWidget.style.animationCurve != widget.style.animationCurve ||
+        oldWidget.style.defaultAnimationTrigger != widget.style.defaultAnimationTrigger ||
+        oldWidget.style.defaultDelayBeforeNext != widget.style.defaultDelayBeforeNext ||
+        oldWidget.style.defaultSegmentAnimationDuration != widget.style.defaultSegmentAnimationDuration ||
+        oldWidget.style.segmentAnimationConfigs != widget.style.segmentAnimationConfigs ||
+        _didSeriesAnimationConfigChange(oldWidget.series, widget.series);
+
+    if (shouldResetAnimation) {
+      _controller.duration = _calculateTotalAnimationDuration();
       // Recreate the animation with the new curve
       _animation = Tween<double>(begin: 0.0, end: 1.0).animate(
         CurvedAnimation(parent: _controller, curve: widget.style.animationCurve),
@@ -143,6 +478,26 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
         _controller.forward();
       } catch (_) {}
     }
+  }
+
+  bool _didSeriesAnimationConfigChange(List<HybridChartSeries> oldSeries, List<HybridChartSeries> newSeries) {
+    if (oldSeries.length != newSeries.length) return true;
+
+    for (int i = 0; i < oldSeries.length; i++) {
+      final oldConfig = oldSeries[i].animationConfig;
+      final newConfig = newSeries[i].animationConfig;
+
+      if (oldConfig?.animationOrder != newConfig?.animationOrder ||
+          oldConfig?.animationType != newConfig?.animationType ||
+          oldConfig?.animationTrigger != newConfig?.animationTrigger ||
+          oldConfig?.duration != newConfig?.duration ||
+          oldConfig?.delayBeforeNext != newConfig?.delayBeforeNext ||
+          oldConfig?.curve != newConfig?.curve) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   void _handlePanUpdate(DragUpdateDetails details) {
@@ -164,10 +519,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
     }
 
     // Check for point hover tooltips in area/line modes first if enabled
-    if (widget.showPointTooltipOnHover && 
-        (_currentChartType == HybridChartType.area || 
-         _currentChartType == HybridChartType.multiLine || 
-         _currentChartType == HybridChartType.line)) {
+    if (widget.showPointTooltipOnHover && (_currentChartType == HybridChartType.area || _currentChartType == HybridChartType.multiLine || _currentChartType == HybridChartType.line)) {
       final pointHit = _checkPointHover(chartArea, pointerPosition);
       if (pointHit != null) return pointHit;
     }
@@ -257,9 +609,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
             continue;
           }
           // Build HTML similar to candlestick painter's tooltip
-            final dateStr = (data.label.trim().isNotEmpty)
-              ? data.label
-              : DateFormat('MMM dd, yyyy').format(DateTime.now());
+          final dateStr = (data.label.trim().isNotEmpty) ? data.label : DateFormat('MMM dd, yyyy').format(DateTime.now());
           final html = '''
             <div style="font-family: Arial, sans-serif; padding:6px;">
               <div style="font-weight:bold;margin-bottom:6px;">$dateStr</div>
@@ -326,8 +676,8 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
     final valueRange = maxValue - minValue;
     if (valueRange <= 0) return minValue;
 
-    final clampedY = y.clamp(chartArea.top, chartArea.bottom) as double;
-    final normalized = ((chartArea.bottom - clampedY) / chartArea.height).clamp(0.0, 1.0) as double;
+    final clampedY = y.clamp(chartArea.top, chartArea.bottom);
+    final normalized = ((chartArea.bottom - clampedY) / chartArea.height).clamp(0.0, 1.0);
     return minValue + (normalized * valueRange);
   }
 
@@ -425,9 +775,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
             return _PointDrag(seriesIdx, i, HybridCandlestickValueType.close);
           }
           if (hitBody) {
-            final target = (position.dy - openY).abs() <= (position.dy - closeY).abs()
-                ? HybridCandlestickValueType.open
-                : HybridCandlestickValueType.close;
+            final target = (position.dy - openY).abs() <= (position.dy - closeY).abs() ? HybridCandlestickValueType.open : HybridCandlestickValueType.close;
             return _PointDrag(seriesIdx, i, target);
           }
         }
@@ -660,7 +1008,6 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
     // Position tooltip above marker using measured height when available
     final cfg = widget.style.keyEventMarkerConfig ?? const KeyEventMarkerConfig();
     final markerSize = _activeHtmlTooltip!.markerSize ?? cfg.size;
-    final markerVerticalOffset = _activeHtmlTooltip!.verticalOffset ?? cfg.verticalOffset;
     final gap = 8.0;
 
     // _activeTooltipPosition is already the marker position adjusted by the verticalOffset
@@ -721,7 +1068,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
       return Container(
         width: widget.width,
         height: widget.height,
-        decoration: BoxDecoration(color: widget.backgroundColor ?? widget.style.backgroundColor ?? Colors.white),
+        decoration: BoxDecoration(color: widget.backgroundColor ?? widget.style.backgroundColor),
         child: const Center(child: Text('No data available')),
       );
     }
@@ -748,7 +1095,6 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
           // area for hit-testing and tooltip anchoring so triggers
           // remain aligned with visible markers/candles.
           Rect mainArea = chartArea;
-          Rect volumeArea = chartArea;
           if (widget.style.showVolume && widget.style.showVolumeBelowChart) {
             final areaRatio = widget.style.volumeAreaHeightRatio.clamp(0.0, 0.5);
             final vOffset = widget.style.volumeBarVerticalOffset;
@@ -758,7 +1104,6 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
             }
             final mainH = (chartArea.height - volH).clamp(0.0, chartArea.height);
             mainArea = Rect.fromLTWH(chartArea.left, chartArea.top, chartArea.width, mainH);
-            volumeArea = Rect.fromLTWH(chartArea.left, chartArea.top + mainH, chartArea.width, volH);
           }
 
           // Recalculate tooltip position if active (handles resize automatically)
@@ -776,137 +1121,137 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
             }
           }
 
-            return Column(
-          mainAxisSize: MainAxisSize.max,
-      children: [
-        // Title and chart type switcher
-        if (widget.title != null || widget.showChartTypeToggle)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                if (widget.title != null)
-                  Text(
-                    widget.title!,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              // Chart type toggle
-              if (widget.showChartTypeToggle)
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
+          return Column(
+            mainAxisSize: MainAxisSize.max,
+            children: [
+              // Title and chart type switcher
+              if (widget.title != null || widget.showChartTypeToggle)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      for (final type in HybridChartType.values)
-                        GestureDetector(
-                          onTap: () => _switchChartType(type),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _currentChartType == type
-                                  ? Colors.blue.withValues(alpha: 0.2)
-                                  : Colors.transparent,
-                              border: _currentChartType == type
-                                  ? Border(
-                                      bottom: BorderSide(
-                                        color: Colors.blue,
-                                        width: 2,
+                      if (widget.title != null)
+                        Text(
+                          widget.title!,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      // Chart type toggle
+                      if (widget.showChartTypeToggle)
+                        Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            children: [
+                              for (final type in HybridChartType.values)
+                                GestureDetector(
+                                  onTap: () => _switchChartType(type),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: _currentChartType == type ? Colors.blue.withValues(alpha: 0.2) : Colors.transparent,
+                                      border: _currentChartType == type
+                                          ? Border(
+                                              bottom: BorderSide(
+                                                color: Colors.blue,
+                                                width: 2,
+                                              ),
+                                            )
+                                          : null,
+                                    ),
+                                    child: Text(
+                                      type.displayName,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: _currentChartType == type ? FontWeight.bold : FontWeight.normal,
+                                        color: _currentChartType == type ? Colors.blue : Colors.grey,
                                       ),
-                                    )
-                                  : null,
-                            ),
-                            child: Text(
-                              type.displayName,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: _currentChartType == type ? FontWeight.bold : FontWeight.normal,
-                                color: _currentChartType == type ? Colors.blue : Colors.grey,
-                              ),
-                            ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                     ],
+                  ),
+                ),
+
+              // Chart
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanStart: (details) {
+                    _tryStartPointDrag(mainArea, details.localPosition);
+                  },
+                  onPanUpdate: (details) {
+                    if (_activeDragPoint != null) {
+                      _updateDraggedPoint(mainArea, details.localPosition);
+                      return;
+                    }
+                    _handlePanUpdate(details);
+                  },
+                  onPanEnd: (_) => _endPointDrag(),
+                  onPanCancel: _endPointDrag,
+                  child: MouseRegion(
+                    onEnter: (_) => setState(() => _hoverPosition = null),
+                    onHover: (details) {
+                      if (_activeDragPoint != null) {
+                        setState(() => _hoverPosition = details.localPosition);
+                        return;
+                      }
+                      setState(() {
+                        _hoverPosition = details.localPosition;
+                        _updateActiveTooltip(mainArea, details.localPosition);
+                      });
+                    },
+                    onExit: (_) => setState(() {
+                      _hoverPosition = null;
+                      _activeHtmlTooltip = null;
+                      _activeTooltipPosition = null;
+                    }),
+                    child: SizedBox(
+                      width: constraints.maxWidth,
+                      child: Stack(
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: widget.backgroundColor ?? widget.style.backgroundColor,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: AnimatedBuilder(
+                              animation: _animation,
+                              builder: (context, _) {
+                                return CustomPaint(
+                                  size: Size(constraints.maxWidth, actualHeight),
+                                  painter: HybridChartPainter(
+                                    series: widget.series,
+                                    progress: _animation.value,
+                                    seriesAnimationProgress: _seriesAnimationProgress,
+                                    segmentAnimationProgress: _segmentAnimationProgress,
+                                    style: widget.style,
+                                    axisConfig: widget.axisConfig,
+                                    chartType: _currentChartType,
+                                    hoverPosition: _hoverPosition,
+                                    scrollOffset: _scrollOffset,
+                                    volumeBelowChart: widget.style.showVolumeBelowChart,
+                                    enableHoverPointScale: widget.enableHoverPointScale,
+                                    hoverPointScale: widget.hoverPointScale,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          // Tooltip overlay
+                          _buildHtmlTooltip(constraints.maxWidth, actualHeight),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
-          ),
-        ),
-
-        // Chart
-        Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onPanStart: (details) {
-              _tryStartPointDrag(mainArea, details.localPosition);
-            },
-            onPanUpdate: (details) {
-              if (_activeDragPoint != null) {
-                _updateDraggedPoint(mainArea, details.localPosition);
-                return;
-              }
-              _handlePanUpdate(details);
-            },
-            onPanEnd: (_) => _endPointDrag(),
-            onPanCancel: _endPointDrag,
-            child: MouseRegion(
-              onEnter: (_) => setState(() => _hoverPosition = null),
-              onHover: (details) {
-                if (_activeDragPoint != null) {
-                  setState(() => _hoverPosition = details.localPosition);
-                  return;
-                }
-                setState(() {
-                  _hoverPosition = details.localPosition;
-                  _updateActiveTooltip(mainArea, details.localPosition);
-                });
-              },
-              onExit: (_) => setState(() {
-                _hoverPosition = null;
-                _activeHtmlTooltip = null;
-                _activeTooltipPosition = null;
-              }),
-              child: SizedBox(
-                width: constraints.maxWidth,
-                child: Stack(
-                  children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        color: widget.backgroundColor ?? widget.style.backgroundColor ?? Colors.white,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: AnimatedBuilder(
-                        animation: _animation,
-                        builder: (context, _) {
-                          return CustomPaint(
-                            size: Size(constraints.maxWidth, actualHeight),
-                            painter: HybridChartPainter(
-                              series: widget.series,
-                              progress: _animation.value,
-                              style: widget.style,
-                              axisConfig: widget.axisConfig,
-                              chartType: _currentChartType,
-                              hoverPosition: _hoverPosition,
-                              scrollOffset: _scrollOffset,
-                              volumeBelowChart: widget.style.showVolumeBelowChart,
-                              enableHoverPointScale: widget.enableHoverPointScale,
-                              hoverPointScale: widget.hoverPointScale,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    // Tooltip overlay
-                    _buildHtmlTooltip(constraints.maxWidth, actualHeight),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
           );
         },
       ),
@@ -916,6 +1261,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with SingleTi
   @override
   void dispose() {
     _controller.dispose();
+    _manualSegmentTicker?.dispose();
     super.dispose();
   }
 }

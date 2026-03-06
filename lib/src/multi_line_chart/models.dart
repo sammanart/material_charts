@@ -1,21 +1,214 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
+
+import '../shared/shared_models.dart';
+
+/// Enumeration of animation types for multi-line chart animations.
+///
+/// Defines different animation styles that can be applied to lines:
+/// - [drawLine]: Line draws from left to right
+/// - [fadeIn]: Line fades in without drawing animation
+/// - [slideUp]: Line slides up from bottom
+enum LineAnimationType {
+  drawLine,
+  fadeIn,
+  slideUp,
+}
+
+/// Enumeration of animation triggers for sequential line animations.
+///
+/// Defines what triggers the next line's animation:
+/// - [afterDelay]: Wait for a specified delay before next animation
+/// - [afterPrevious]: Wait for previous line animation to complete before starting
+/// - [immediate]: Start all lines at the same time
+/// - [manual]: Wait for manual trigger via triggerAnimation() before starting
+enum LineAnimationTrigger {
+  afterDelay,
+  afterPrevious,
+  immediate,
+  manual,
+}
+
+/// Configuration class for individual line animations.
+///
+/// This class defines the animation properties for a specific line in the chart.
+/// It allows fine-grained control over how and when each line animates.
+class LineAnimationConfig {
+  /// The order in which this line animates (0-based index).
+  /// Lines with lower order values animate first.
+  /// Multiple lines can have the same order to animate simultaneously.
+  final int animationOrder;
+
+  /// The type of animation to apply to this line.
+  final LineAnimationType animationType;
+
+  /// What triggers the next animation in the sequence.
+  final LineAnimationTrigger animationTrigger;
+
+  /// The duration of this line's animation in milliseconds.
+  /// If null, uses the style's default animationDuration.
+  final Duration? duration;
+
+  /// The delay before the next line's animation starts (in milliseconds).
+  /// Only used when animationTrigger is [LineAnimationTrigger.afterDelay].
+  final Duration delayBeforeNext;
+
+  /// The animation curve for this line.
+  /// If null, uses the style's default animationCurve.
+  final Curve? curve;
+
+  /// Creates an instance of [LineAnimationConfig].
+  const LineAnimationConfig({
+    this.animationOrder = 0,
+    this.animationType = LineAnimationType.drawLine,
+    this.animationTrigger = LineAnimationTrigger.afterDelay,
+    this.duration,
+    this.delayBeforeNext = const Duration(milliseconds: 100),
+    this.curve,
+  });
+
+  /// Creates a [LineAnimationConfig] from a JSON map.
+  factory LineAnimationConfig.fromJson(Map<String, dynamic> json) {
+    return LineAnimationConfig(
+      animationOrder: json['animationOrder'] ?? 0,
+      animationType: parseAnimationType(json['animationType'] ?? 'drawLine'),
+      animationTrigger:
+          parseAnimationTrigger(json['animationTrigger'] ?? 'afterDelay'),
+      duration: json['duration'] != null
+          ? Duration(milliseconds: json['duration'] as int)
+          : null,
+      delayBeforeNext: json['delayBeforeNext'] != null
+          ? Duration(milliseconds: json['delayBeforeNext'] as int)
+          : const Duration(milliseconds: 100),
+      curve: json['curve'] != null ? parseAnimationCurve(json['curve']) : null,
+    );
+  }
+
+  /// Converts the [LineAnimationConfig] to a JSON map.
+  Map<String, dynamic> toJson() {
+    return {
+      'animationOrder': animationOrder,
+      'animationType': _animationTypeToString(animationType),
+      'animationTrigger': _animationTriggerToString(animationTrigger),
+      if (duration != null) 'duration': duration!.inMilliseconds,
+      'delayBeforeNext': delayBeforeNext.inMilliseconds,
+      if (curve != null) 'curve': _curveToString(curve!),
+    };
+  }
+
+  /// Helper to parse animation type from string
+  static LineAnimationType parseAnimationType(String typeStr) {
+    switch (typeStr.toLowerCase()) {
+      case 'drawline':
+        return LineAnimationType.drawLine;
+      case 'fadein':
+        return LineAnimationType.fadeIn;
+      case 'slideup':
+        return LineAnimationType.slideUp;
+      default:
+        return LineAnimationType.drawLine;
+    }
+  }
+
+  /// Helper to convert animation type to string
+  static String _animationTypeToString(LineAnimationType type) {
+    switch (type) {
+      case LineAnimationType.drawLine:
+        return 'drawLine';
+      case LineAnimationType.fadeIn:
+        return 'fadeIn';
+      case LineAnimationType.slideUp:
+        return 'slideUp';
+    }
+  }
+
+  /// Helper to parse animation trigger from string
+  static LineAnimationTrigger parseAnimationTrigger(String triggerStr) {
+    switch (triggerStr.toLowerCase()) {
+      case 'afterdelay':
+        return LineAnimationTrigger.afterDelay;
+      case 'afterprevious':
+        return LineAnimationTrigger.afterPrevious;
+      case 'immediate':
+        return LineAnimationTrigger.immediate;
+      case 'manual':
+        return LineAnimationTrigger.manual;
+      default:
+        return LineAnimationTrigger.afterDelay;
+    }
+  }
+
+  /// Helper to convert animation trigger to string
+  static String _animationTriggerToString(LineAnimationTrigger trigger) {
+    switch (trigger) {
+      case LineAnimationTrigger.afterDelay:
+        return 'afterDelay';
+      case LineAnimationTrigger.afterPrevious:
+        return 'afterPrevious';
+      case LineAnimationTrigger.immediate:
+        return 'immediate';
+      case LineAnimationTrigger.manual:
+        return 'manual';
+    }
+  }
+
+  /// Helper to parse animation curve from string
+  static Curve parseAnimationCurve(String curveStr) {
+    switch (curveStr.toLowerCase()) {
+      case 'linear':
+        return Curves.linear;
+      case 'easein':
+        return Curves.easeIn;
+      case 'easeout':
+        return Curves.easeOut;
+      case 'easeinout':
+        return Curves.easeInOut;
+      case 'bouncein':
+        return Curves.bounceIn;
+      case 'bounceout':
+        return Curves.bounceOut;
+      case 'elasticinout':
+        return Curves.elasticInOut;
+      default:
+        return Curves.easeInOut;
+    }
+  }
+
+  /// Helper to convert curve to string
+  static String _curveToString(Curve curve) {
+    if (curve == Curves.linear) return 'linear';
+    if (curve == Curves.easeIn) return 'easeIn';
+    if (curve == Curves.easeOut) return 'easeOut';
+    if (curve == Curves.easeInOut) return 'easeInOut';
+    if (curve == Curves.bounceIn) return 'bounceIn';
+    if (curve == Curves.bounceOut) return 'bounceOut';
+    if (curve == Curves.elasticInOut) return 'elasticInOut';
+    return 'easeInOut';
+  }
+}
 
 /// Represents a single data point in a chart.
 ///
 /// This class holds the value of the data point, an optional label,
-/// and an optional color. It is used to define individual points
-/// on various types of charts.
+/// an optional color, and an optional segment animation order.
+/// It is used to define individual points on various types of charts.
 class ChartDataPoint {
   final double value; // The numeric value of the data point.
   final String? label; // An optional label for the data point.
   final Color? color; // An optional color associated with the data point.
+  final int segmentAnimationOrder; // Segment animation group (0-based index).
 
   /// Creates a [ChartDataPoint] instance.
   ///
   /// [value] is required to define the data point.
-  /// [label] and [color] are optional.
-  const ChartDataPoint({required this.value, this.label, this.color});
+  /// [label], [color], and [segmentAnimationOrder] are optional.
+  const ChartDataPoint({
+    required this.value,
+    this.label,
+    this.color,
+    this.segmentAnimationOrder = 0,
+  });
 
   /// Creates a [ChartDataPoint] instance from a JSON map.
   /// Supports both simple and Plotly-compatible formats.
@@ -24,6 +217,7 @@ class ChartDataPoint {
       value: (json['y'] ?? json['value'] ?? 0.0).toDouble(),
       label: json['x'] ?? json['label'],
       color: json['color'] != null ? _parseColor(json['color']) : null,
+      segmentAnimationOrder: json['segmentAnimationOrder'] ?? 0,
     );
   }
 
@@ -33,6 +227,7 @@ class ChartDataPoint {
       'x': label,
       'y': value,
       if (color != null) 'color': _colorToHex(color!),
+      if (segmentAnimationOrder != 0) 'segmentAnimationOrder': segmentAnimationOrder,
     };
   }
 
@@ -221,6 +416,8 @@ class ChartSeries {
   final bool? smoothLine; // Flag to determine if the line should be smooth.
   final double? lineWidth; // Width of the line.
   final double? pointSize; // Size of the points on the chart.
+  final LineAnimationConfig?
+      animationConfig; // Optional animation configuration for the series.
 
   /// Creates a [ChartSeries] instance.
   ///
@@ -234,6 +431,7 @@ class ChartSeries {
     this.smoothLine,
     this.lineWidth,
     this.pointSize,
+    this.animationConfig,
   });
 
   /// Creates a [ChartSeries] instance from a JSON map.
@@ -293,6 +491,9 @@ class ChartSeries {
           json['lineWidth']?.toDouble() ?? json['line']?['width']?.toDouble(),
       pointSize:
           json['pointSize']?.toDouble() ?? json['marker']?['size']?.toDouble(),
+      animationConfig: json['animationConfig'] != null
+          ? LineAnimationConfig.fromJson(json['animationConfig'])
+          : null,
     );
   }
 
@@ -307,6 +508,7 @@ class ChartSeries {
       if (smoothLine != null) 'smoothLine': smoothLine,
       if (lineWidth != null) 'lineWidth': lineWidth,
       if (pointSize != null) 'pointSize': pointSize,
+      if (animationConfig != null) 'animationConfig': animationConfig!.toJson(),
     };
   }
 }
@@ -338,6 +540,13 @@ class MultiLineChartStyle {
   final bool forceYAxisFromZero; // Flag to enforce Y-axis to start from zero.
   final MultiLineTooltipStyle
       tooltipStyle; // Styling configuration for tooltips.
+  final LineAnimationType defaultAnimationType; // Default animation type for lines.
+  final LineAnimationTrigger defaultAnimationTrigger; // Default animation trigger for lines.
+  final Duration defaultAnimationDuration; // Default animation duration for lines.
+  final Duration defaultDelayBeforeNext; // Default delay between sequential animations.
+  final Curve defaultAnimationCurve; // Default animation curve for lines.
+  final Map<int, SegmentAnimationConfig> segmentAnimationConfigs; // Per-segment animation configs grouped by segmentAnimationOrder.
+  final Duration defaultSegmentAnimationDuration; // Default duration for segment animations.
 
   /// Creates a [MultiLineChartStyle] instance with default values.
   ///
@@ -365,6 +574,13 @@ class MultiLineChartStyle {
         false, // Default to false to maintain existing behavior.
     this.tooltipStyle =
         const MultiLineTooltipStyle(), // Initialize tooltip style.
+    this.defaultAnimationType = LineAnimationType.drawLine,
+    this.defaultAnimationTrigger = LineAnimationTrigger.afterDelay,
+    this.defaultAnimationDuration = const Duration(milliseconds: 800),
+    this.defaultDelayBeforeNext = const Duration(milliseconds: 100),
+    this.defaultAnimationCurve = Curves.easeInOut,
+    this.segmentAnimationConfigs = const {},
+    this.defaultSegmentAnimationDuration = const Duration(milliseconds: 600),
   });
 
   /// Creates a [MultiLineChartStyle] instance from a JSON map.
@@ -450,6 +666,34 @@ class MultiLineChartStyle {
       tooltipStyle: MultiLineTooltipStyle.fromJson(
         json['tooltipStyle'] ?? json['hoverlabel'] ?? {},
       ),
+      defaultAnimationType: LineAnimationConfig.parseAnimationType(
+        json['defaultAnimationType'] ?? 'drawLine',
+      ),
+      defaultAnimationTrigger: LineAnimationConfig.parseAnimationTrigger(
+        json['defaultAnimationTrigger'] ?? 'afterDelay',
+      ),
+      defaultAnimationDuration: json['defaultAnimationDuration'] != null
+          ? Duration(milliseconds: json['defaultAnimationDuration'] as int)
+          : const Duration(milliseconds: 800),
+      defaultDelayBeforeNext: json['defaultDelayBeforeNext'] != null
+          ? Duration(milliseconds: json['defaultDelayBeforeNext'] as int)
+          : const Duration(milliseconds: 100),
+      defaultAnimationCurve: LineAnimationConfig.parseAnimationCurve(
+        json['defaultAnimationCurve'] ?? 'easeInOut',
+      ),
+      segmentAnimationConfigs: json['segmentAnimationConfigs'] != null
+          ? Map<int, SegmentAnimationConfig>.fromEntries(
+              (json['segmentAnimationConfigs'] as List)
+                  .map((cfg) => MapEntry(
+                        cfg['segmentAnimationOrder'] as int,
+                        SegmentAnimationConfig.fromJson(cfg),
+                      ))
+                  .toList(),
+            )
+          : const {},
+      defaultSegmentAnimationDuration: json['defaultSegmentAnimationDuration'] != null
+          ? Duration(milliseconds: json['defaultSegmentAnimationDuration'] as int)
+          : const Duration(milliseconds: 600),
     );
   }
 
@@ -533,6 +777,13 @@ class MultiLineChartStyle {
     CrosshairConfig? crosshair,
     bool? forceYAxisFromZero,
     MultiLineTooltipStyle? tooltipStyle,
+    LineAnimationType? defaultAnimationType,
+    LineAnimationTrigger? defaultAnimationTrigger,
+    Duration? defaultAnimationDuration,
+    Duration? defaultDelayBeforeNext,
+    Curve? defaultAnimationCurve,
+    Map<int, SegmentAnimationConfig>? segmentAnimationConfigs,
+    Duration? defaultSegmentAnimationDuration,
   }) {
     return MultiLineChartStyle(
       colors: colors ?? this.colors,
@@ -554,6 +805,13 @@ class MultiLineChartStyle {
       crosshair: crosshair ?? this.crosshair,
       forceYAxisFromZero: forceYAxisFromZero ?? this.forceYAxisFromZero,
       tooltipStyle: tooltipStyle ?? this.tooltipStyle,
+      defaultAnimationType: defaultAnimationType ?? this.defaultAnimationType,
+      defaultAnimationTrigger: defaultAnimationTrigger ?? this.defaultAnimationTrigger,
+      defaultAnimationDuration: defaultAnimationDuration ?? this.defaultAnimationDuration,
+      defaultDelayBeforeNext: defaultDelayBeforeNext ?? this.defaultDelayBeforeNext,
+      defaultAnimationCurve: defaultAnimationCurve ?? this.defaultAnimationCurve,
+      segmentAnimationConfigs: segmentAnimationConfigs ?? this.segmentAnimationConfigs,
+      defaultSegmentAnimationDuration: defaultSegmentAnimationDuration ?? this.defaultSegmentAnimationDuration,
     );
   }
 }

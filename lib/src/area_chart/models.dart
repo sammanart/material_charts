@@ -4,17 +4,210 @@ import 'package:flutter/material.dart';
 
 import '../shared/shared_models.dart';
 
+/// Enumeration of animation types for area chart area animations.
+///
+/// Defines different animation styles that can be applied to areas:
+/// - [drawLine]: Area draws from left to right
+/// - [fadeIn]: Area fades in without drawing animation
+/// - [slideUp]: Area slides up from bottom
+enum AreaAnimationType {
+  drawLine,
+  fadeIn,
+  slideUp,
+}
+
+/// Enumeration of animation triggers for sequential area animations.
+///
+/// Defines what triggers the next area's animation:
+/// - [afterDelay]: Wait for a specified delay before next animation
+/// - [afterPrevious]: Wait for previous area animation to complete before starting
+/// - [immediate]: Start all areas at the same time
+/// - [manual]: Wait for manual trigger via triggerAnimation() before starting
+enum AreaAnimationTrigger {
+  afterDelay,
+  afterPrevious,
+  immediate,
+  manual,
+}
+
+/// Configuration class for individual area animations.
+///
+/// This class defines the animation properties for a specific area in the chart.
+/// It allows fine-grained control over how and when each area animates.
+class AreaAnimationConfig {
+  /// The order in which this area animates (0-based index).
+  /// Areas with lower order values animate first.
+  /// Multiple areas can have the same order to animate simultaneously.
+  final int animationOrder;
+
+  /// The type of animation to apply to this area.
+  final AreaAnimationType animationType;
+
+  /// What triggers the next animation in the sequence.
+  final AreaAnimationTrigger animationTrigger;
+
+  /// The duration of this area's animation in milliseconds.
+  /// If null, uses the style's default animationDuration.
+  final Duration? duration;
+
+  /// The delay before the next area's animation starts (in milliseconds).
+  /// Only used when animationTrigger is [AreaAnimationTrigger.afterDelay].
+  final Duration delayBeforeNext;
+
+  /// The animation curve for this area.
+  /// If null, uses the style's default animationCurve.
+  final Curve? curve;
+
+  /// Creates an instance of [AreaAnimationConfig].
+  const AreaAnimationConfig({
+    this.animationOrder = 0,
+    this.animationType = AreaAnimationType.drawLine,
+    this.animationTrigger = AreaAnimationTrigger.afterDelay,
+    this.duration,
+    this.delayBeforeNext = const Duration(milliseconds: 100),
+    this.curve,
+  });
+
+  /// Creates an [AreaAnimationConfig] from a JSON map.
+  factory AreaAnimationConfig.fromJson(Map<String, dynamic> json) {
+    return AreaAnimationConfig(
+      animationOrder: json['animationOrder'] ?? 0,
+      animationType: _parseAnimationType(json['animationType'] ?? 'drawLine'),
+      animationTrigger: _parseAnimationTrigger(json['animationTrigger'] ?? 'afterDelay'),
+      duration: json['duration'] != null ? Duration(milliseconds: json['duration'] as int) : null,
+      delayBeforeNext: json['delayBeforeNext'] != null ? Duration(milliseconds: json['delayBeforeNext'] as int) : const Duration(milliseconds: 100),
+      curve: json['curve'] != null ? _parseAnimationCurve(json['curve']) : null,
+    );
+  }
+
+  /// Converts the [AreaAnimationConfig] to a JSON map.
+  Map<String, dynamic> toJson() {
+    return {
+      'animationOrder': animationOrder,
+      'animationType': _animationTypeToString(animationType),
+      'animationTrigger': _animationTriggerToString(animationTrigger),
+      if (duration != null) 'duration': duration!.inMilliseconds,
+      'delayBeforeNext': delayBeforeNext.inMilliseconds,
+      if (curve != null) 'curve': _curveToString(curve!),
+    };
+  }
+
+  /// Helper to parse animation type from string
+  static AreaAnimationType _parseAnimationType(String typeStr) {
+    switch (typeStr.toLowerCase()) {
+      case 'drawline':
+        return AreaAnimationType.drawLine;
+      case 'fadein':
+        return AreaAnimationType.fadeIn;
+      case 'slideup':
+        return AreaAnimationType.slideUp;
+      default:
+        return AreaAnimationType.drawLine;
+    }
+  }
+
+  /// Helper to convert animation type to string
+  static String _animationTypeToString(AreaAnimationType type) {
+    switch (type) {
+      case AreaAnimationType.drawLine:
+        return 'drawLine';
+      case AreaAnimationType.fadeIn:
+        return 'fadeIn';
+      case AreaAnimationType.slideUp:
+        return 'slideUp';
+    }
+  }
+
+  /// Helper to parse animation trigger from string
+  static AreaAnimationTrigger _parseAnimationTrigger(String triggerStr) {
+    switch (triggerStr.toLowerCase()) {
+      case 'afterdelay':
+        return AreaAnimationTrigger.afterDelay;
+      case 'afterprevious':
+        return AreaAnimationTrigger.afterPrevious;
+      case 'immediate':
+        return AreaAnimationTrigger.immediate;
+      case 'manual':
+        return AreaAnimationTrigger.manual;
+      default:
+        return AreaAnimationTrigger.afterDelay;
+    }
+  }
+
+  /// Helper to convert animation trigger to string
+  static String _animationTriggerToString(AreaAnimationTrigger trigger) {
+    switch (trigger) {
+      case AreaAnimationTrigger.afterDelay:
+        return 'afterDelay';
+      case AreaAnimationTrigger.afterPrevious:
+        return 'afterPrevious';
+      case AreaAnimationTrigger.immediate:
+        return 'immediate';
+      case AreaAnimationTrigger.manual:
+        return 'manual';
+    }
+  }
+
+  /// Helper to parse animation curve from string
+  static Curve _parseAnimationCurve(String curveStr) {
+    switch (curveStr.toLowerCase()) {
+      case 'easeout':
+        return Curves.easeOut;
+      case 'easein':
+        return Curves.easeIn;
+      case 'easeinout':
+        return Curves.easeInOut;
+      case 'linear':
+        return Curves.linear;
+      case 'bounceout':
+        return Curves.bounceOut;
+      case 'bounceIn':
+        return Curves.bounceIn;
+      case 'bounceInOut':
+        return Curves.bounceInOut;
+      case 'elasticOut':
+        return Curves.elasticOut;
+      case 'elasticIn':
+        return Curves.elasticIn;
+      case 'elasticInOut':
+        return Curves.elasticInOut;
+      default:
+        return Curves.easeInOut;
+    }
+  }
+
+  /// Helper to convert animation curve to string
+  static String _curveToString(Curve curve) {
+    if (curve == Curves.easeOut) return 'easeOut';
+    if (curve == Curves.easeIn) return 'easeIn';
+    if (curve == Curves.easeInOut) return 'easeInOut';
+    if (curve == Curves.linear) return 'linear';
+    if (curve == Curves.bounceOut) return 'bounceOut';
+    if (curve == Curves.bounceIn) return 'bounceIn';
+    if (curve == Curves.bounceInOut) return 'bounceInOut';
+    if (curve == Curves.elasticOut) return 'elasticOut';
+    if (curve == Curves.elasticIn) return 'elasticIn';
+    if (curve == Curves.elasticInOut) return 'elasticInOut';
+    return 'easeInOut';
+  }
+}
+
 /// Represents a single data point in the area chart.
 class AreaChartData {
   final double value; // The value of the data point, plotted on the Y-axis.
-  final String?
-      label; // Optional label for the data point, shown on the X-axis.
-  final TooltipConfig?
-      tooltipConfig; // Configuration for the tooltip displayed on hover.
+  final String? label; // Optional label for the data point, shown on the X-axis.
+  final TooltipConfig? tooltipConfig; // Configuration for the tooltip displayed on hover.
   final KeyEventData? keyEvent; // Optional key event data for special markers
+  final int segmentAnimationOrder; // Segment animation group (0-based index).
 
   /// Creates an instance of `AreaChartData`.
-  const AreaChartData({required this.value, this.label, this.tooltipConfig, this.keyEvent});
+  const AreaChartData({
+    required this.value,
+    this.label,
+    this.tooltipConfig,
+    this.keyEvent,
+    this.segmentAnimationOrder = 0,
+  });
 }
 
 /// Configuration for tooltips displayed when hovering over chart points.
@@ -45,7 +238,7 @@ class TooltipConfig {
     this.maxHeight,
     this.decoration,
   });
-  
+
   /// Creates a TooltipConfig with HTML content
   /// Use the flutter_html package to render the HTML in the chart widget
   const TooltipConfig.html({
@@ -55,13 +248,13 @@ class TooltipConfig {
     EdgeInsets padding = const EdgeInsets.all(8.0),
     BoxDecoration? decoration,
   }) : this(
-    htmlContent: htmlContent,
-    maxWidth: maxWidth,
-    maxHeight: maxHeight,
-    padding: padding,
-    decoration: decoration,
-  );
-  
+          htmlContent: htmlContent,
+          maxWidth: maxWidth,
+          maxHeight: maxHeight,
+          padding: padding,
+          decoration: decoration,
+        );
+
   /// Whether this tooltip has HTML content
   bool get hasHtmlContent => htmlContent != null;
 }
@@ -71,12 +264,12 @@ class AreaChartSeries {
   final String name; // Name of the series (used for legend or labels).
   final List<AreaChartData> dataPoints; // List of data points in the series.
   final Color? color; // Primary color for the series line or area.
-  final Color?
-      gradientColor; // Optional gradient color for the area under the line.
+  final Color? gradientColor; // Optional gradient color for the area under the line.
   final double? lineWidth; // Thickness of the series line.
   final bool? showPoints; // Whether to display markers at data points.
   final double? pointSize; // Size of the markers for data points.
   final TooltipConfig? tooltipConfig; // Tooltip configuration for this series.
+  final AreaAnimationConfig? animationConfig; // Animation configuration for this series.
 
   /// Creates an instance of `AreaChartSeries`.
   const AreaChartSeries({
@@ -88,6 +281,7 @@ class AreaChartSeries {
     this.showPoints,
     this.pointSize,
     this.tooltipConfig,
+    this.animationConfig,
   });
 
   /// Creates an `AreaChartSeries` from a Plotly trace object.
@@ -122,8 +316,7 @@ class AreaChartSeries {
     final String seriesName = trace['name']?.toString() ?? 'Series';
 
     // Parse line properties
-    final Map<String, dynamic>? lineConfig =
-        trace['line'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? lineConfig = trace['line'] as Map<String, dynamic>?;
     Color? lineColor;
     double? lineWidth;
 
@@ -133,23 +326,20 @@ class AreaChartSeries {
     }
 
     // Parse marker properties
-    final Map<String, dynamic>? markerConfig =
-        trace['marker'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? markerConfig = trace['marker'] as Map<String, dynamic>?;
     double? pointSize;
     bool? showPoints;
 
     if (markerConfig != null) {
       pointSize = _parseNumber(markerConfig['size'])?.toDouble();
-      showPoints =
-          true; // If marker config exists, assume points should be shown
+      showPoints = true; // If marker config exists, assume points should be shown
     }
 
     // Determine if this should be treated as area chart
     final String? fill = trace['fill']?.toString();
     Color? gradientColor;
 
-    if (fill != null &&
-        (fill == 'tozeroy' || fill == 'tonexty' || fill == 'toself')) {
+    if (fill != null && (fill == 'tozeroy' || fill == 'tonexty' || fill == 'toself')) {
       // If fill is specified, create a gradient color
       if (lineColor != null) {
         gradientColor = lineColor.withValues(alpha: 0.2);
@@ -198,8 +388,7 @@ class AreaChartSeries {
         final int r = int.parse(match.group(1)!);
         final int g = int.parse(match.group(2)!);
         final int b = int.parse(match.group(3)!);
-        final double a =
-            match.group(4) != null ? double.parse(match.group(4)!) : 1.0;
+        final double a = match.group(4) != null ? double.parse(match.group(4)!) : 1.0;
         return Color.fromRGBO(r, g, b, a);
       }
     }
@@ -275,6 +464,11 @@ class AreaChartStyle {
   // 'areaFillOpacityTop' applies near the line, 'areaFillOpacityBottom' at the bottom
   final double areaFillOpacityTop;
   final double areaFillOpacityBottom;
+  final AreaAnimationType defaultAnimationType; // Default animation type for areas.
+  final AreaAnimationTrigger defaultAnimationTrigger; // Default animation trigger for areas.
+  final Duration defaultDelayBeforeNext; // Default delay between sequential animations.
+  final Map<int, SegmentAnimationConfig> segmentAnimationConfigs; // Per-segment animation configs grouped by segmentAnimationOrder.
+  final Duration defaultSegmentAnimationDuration; // Default duration for segment animations.
 
   /// Creates an instance of `AreaChartStyle` with default or custom properties.
   const AreaChartStyle({
@@ -302,6 +496,11 @@ class AreaChartStyle {
     this.baseline,
     this.areaFillOpacityTop = 0.2,
     this.areaFillOpacityBottom = 0.0,
+    this.defaultAnimationType = AreaAnimationType.drawLine,
+    this.defaultAnimationTrigger = AreaAnimationTrigger.afterDelay,
+    this.defaultDelayBeforeNext = const Duration(milliseconds: 100),
+    this.segmentAnimationConfigs = const {},
+    this.defaultSegmentAnimationDuration = const Duration(milliseconds: 600),
   });
 
   /// Creates an `AreaChartStyle` from a Plotly layout object.
@@ -312,10 +511,8 @@ class AreaChartStyle {
     final String? title = layout['title']?.toString();
 
     // Extract axis titles
-    final Map<String, dynamic>? xAxis =
-        layout['xaxis'] as Map<String, dynamic>?;
-    final Map<String, dynamic>? yAxis =
-        layout['yaxis'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? xAxis = layout['xaxis'] as Map<String, dynamic>?;
+    final Map<String, dynamic>? yAxis = layout['yaxis'] as Map<String, dynamic>?;
 
     final String? xAxisTitle = xAxis?['title']?.toString();
     final String? yAxisTitle = yAxis?['title']?.toString();
@@ -323,15 +520,13 @@ class AreaChartStyle {
     // Extract background color
     Color backgroundColor = Colors.white;
     if (layout['plot_bgcolor'] != null) {
-      backgroundColor =
-          AreaChartSeries._parseColor(layout['plot_bgcolor']) ?? Colors.white;
+      backgroundColor = AreaChartSeries._parseColor(layout['plot_bgcolor']) ?? Colors.white;
     }
 
     // Extract grid color
     Color gridColor = Colors.grey;
     if (xAxis?['gridcolor'] != null) {
-      gridColor =
-          AreaChartSeries._parseColor(xAxis!['gridcolor']) ?? Colors.grey;
+      gridColor = AreaChartSeries._parseColor(xAxis!['gridcolor']) ?? Colors.grey;
     }
 
     return AreaChartStyle(
@@ -434,8 +629,7 @@ class PlotlyAreaChartParser {
   /// Parses a Plotly data map and returns series and style data.
   static PlotlyAreaChartData fromMap(Map<String, dynamic> plotlyData) {
     final List<dynamic> traces = plotlyData['data'] as List<dynamic>? ?? [];
-    final Map<String, dynamic> layout =
-        plotlyData['layout'] as Map<String, dynamic>? ?? {};
+    final Map<String, dynamic> layout = plotlyData['layout'] as Map<String, dynamic>? ?? {};
 
     // Convert traces to AreaChartSeries
     final List<AreaChartSeries> series = traces
@@ -446,17 +640,13 @@ class PlotlyAreaChartParser {
           final String? fill = trace['fill']?.toString();
 
           // Include scatter traces with fill, or explicit area/line types
-          return (type == 'scatter' && fill != null) ||
-              type == 'area' ||
-              type == null; // Default to scatter if no type specified
+          return (type == 'scatter' && fill != null) || type == 'area' || type == null; // Default to scatter if no type specified
         })
         .map((trace) => AreaChartSeries.fromPlotlyTrace(trace))
         .toList();
 
     // Parse layout to style
-    final AreaChartStyle style = layout.isNotEmpty
-        ? AreaChartStyle.fromPlotlyLayout(layout)
-        : const AreaChartStyle();
+    final AreaChartStyle style = layout.isNotEmpty ? AreaChartStyle.fromPlotlyLayout(layout) : const AreaChartStyle();
 
     return PlotlyAreaChartData(series: series, style: style);
   }

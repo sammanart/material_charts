@@ -1,5 +1,95 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
+
+import 'package:flutter/material.dart';
+
+/// Defines the trigger type for slice animations.
+enum SliceAnimationTrigger {
+  /// Animation starts automatically based on animation order.
+  auto,
+  
+  /// Animation waits until explicitly triggered via [MaterialPieChartState.triggerAnimation].
+  manual,
+  
+  /// Animation starts after a specified delay.
+  afterDelay,
+}
+
+/// Configuration for individual slice animations.
+class PieSliceAnimationConfig {
+  /// The animation order (group) for this slice.
+  /// Slices with the same order animate simultaneously.
+  /// Lower order numbers animate first.
+  final int animationOrder;
+  
+  /// The trigger type for this slice's animation.
+  final SliceAnimationTrigger animationTrigger;
+  
+  /// Duration of the pop-out animation for this slice.
+  final Duration? duration;
+  
+  /// Delay before the next animation order starts (for afterDelay trigger).
+  final Duration? delayBeforeNext;
+  
+  /// The pop-out distance multiplier (1.0 = no pop, 1.2 = 20% larger radius).
+  final double popOutOffset;
+  
+  /// Creates an instance of [PieSliceAnimationConfig].
+  const PieSliceAnimationConfig({
+    this.animationOrder = 0,
+    this.animationTrigger = SliceAnimationTrigger.auto,
+    this.duration,
+    this.delayBeforeNext,
+    this.popOutOffset = 1.15,
+  });
+  
+  /// Creates a [PieSliceAnimationConfig] from a JSON map.
+  factory PieSliceAnimationConfig.fromJson(Map<String, dynamic> json) {
+    return PieSliceAnimationConfig(
+      animationOrder: json['animationOrder'] ?? 0,
+      animationTrigger: _parseTrigger(json['animationTrigger'] ?? 'auto'),
+      duration: json['duration'] != null
+          ? Duration(milliseconds: json['duration'])
+          : null,
+      delayBeforeNext: json['delayBeforeNext'] != null
+          ? Duration(milliseconds: json['delayBeforeNext'])
+          : null,
+      popOutOffset: (json['popOutOffset'] ?? 1.15).toDouble(),
+    );
+  }
+  
+  /// Converts the [PieSliceAnimationConfig] to a JSON map.
+  Map<String, dynamic> toJson() {
+    return {
+      'animationOrder': animationOrder,
+      'animationTrigger': _triggerToString(animationTrigger),
+      if (duration != null) 'duration': duration!.inMilliseconds,
+      if (delayBeforeNext != null) 'delayBeforeNext': delayBeforeNext!.inMilliseconds,
+      'popOutOffset': popOutOffset,
+    };
+  }
+  
+  static SliceAnimationTrigger _parseTrigger(String trigger) {
+    switch (trigger.toLowerCase()) {
+      case 'manual':
+        return SliceAnimationTrigger.manual;
+      case 'afterdelay':
+        return SliceAnimationTrigger.afterDelay;
+      default:
+        return SliceAnimationTrigger.auto;
+    }
+  }
+  
+  static String _triggerToString(SliceAnimationTrigger trigger) {
+    switch (trigger) {
+      case SliceAnimationTrigger.manual:
+        return 'manual';
+      case SliceAnimationTrigger.afterDelay:
+        return 'afterDelay';
+      case SliceAnimationTrigger.auto:
+        return 'auto';
+    }
+  }
+}
 
 /// Represents data for a single slice of a pie chart.
 class PieChartData {
@@ -14,17 +104,22 @@ class PieChartData {
 
   /// The action on tap for the slice.
   final VoidCallback? onTap;
+  
+  /// Animation configuration for this slice.
+  final PieSliceAnimationConfig? animationConfig;
 
   /// Constructor for [PieChartData].
   ///
   /// Requires [value] and [label] to be provided.
   /// [color] is optional and can be null.
   /// [onTap] is optional and can be null.
+  /// [animationConfig] is optional and can be null.
   const PieChartData({
     required this.value,
     required this.label,
     this.color,
     this.onTap,
+    this.animationConfig,
   });
 
   /// Creates a [PieChartData] instance from a JSON map.
@@ -34,6 +129,9 @@ class PieChartData {
       value: (json['value'] ?? json['y'] ?? 0.0).toDouble(),
       label: json['label'] ?? json['x'] ?? '',
       color: json['color'] != null ? parseColor(json['color']) : null,
+      animationConfig: json['animationConfig'] != null
+          ? PieSliceAnimationConfig.fromJson(json['animationConfig'])
+          : null,
     );
   }
 
@@ -43,6 +141,7 @@ class PieChartData {
       'value': value,
       'label': label,
       'color': color != null ? colorToHex(color!) : null,
+      if (animationConfig != null) 'animationConfig': animationConfig!.toJson(),
     };
   }
 
@@ -136,6 +235,21 @@ class PieChartStyle {
 
   /// The position of the chart legend
   final PieChartLegendPosition legendPosition;
+  
+  /// Default animation duration for slice pop-out animations.
+  final Duration defaultSliceAnimationDuration;
+  
+  /// Default animation trigger for slices.
+  final SliceAnimationTrigger defaultSliceAnimationTrigger;
+  
+  /// Default delay before the next animation order starts.
+  final Duration defaultDelayBeforeNext;
+  
+  /// Default pop-out offset multiplier for animated slices.
+  final double defaultPopOutOffset;
+  
+  /// Whether slice animations are enabled.
+  final bool sliceAnimationsEnabled;
 
   /// Constructor for [PieChartStyle].
   ///
@@ -170,6 +284,11 @@ class PieChartStyle {
     this.connectorLineStrokeWidth = 1.0, // Default connector line stroke width
     this.chartAlignment = ChartAlignment.center, // Default vertical position
     this.legendPosition = PieChartLegendPosition.right,
+    this.defaultSliceAnimationDuration = const Duration(milliseconds: 800),
+    this.defaultSliceAnimationTrigger = SliceAnimationTrigger.auto,
+    this.defaultDelayBeforeNext = const Duration(milliseconds: 200),
+    this.defaultPopOutOffset = 1.15,
+    this.sliceAnimationsEnabled = true,
   });
 
   /// Creates a [PieChartStyle] instance from a JSON map.
@@ -221,6 +340,17 @@ class PieChartStyle {
       legendPosition: _parseLegendPosition(
         json['legendPosition'] ?? json['legend']?['orientation'] ?? 'v',
       ),
+      defaultSliceAnimationDuration: Duration(
+        milliseconds: (json['defaultSliceAnimationDuration'] ?? 800).toInt(),
+      ),
+      defaultSliceAnimationTrigger: PieSliceAnimationConfig._parseTrigger(
+        json['defaultSliceAnimationTrigger'] ?? 'auto',
+      ),
+      defaultDelayBeforeNext: Duration(
+        milliseconds: (json['defaultDelayBeforeNext'] ?? 200).toInt(),
+      ),
+      defaultPopOutOffset: (json['defaultPopOutOffset'] ?? 1.15).toDouble(),
+      sliceAnimationsEnabled: json['sliceAnimationsEnabled'] ?? true,
     );
   }
 
@@ -244,6 +374,11 @@ class PieChartStyle {
       'connectorLineStrokeWidth': connectorLineStrokeWidth,
       'chartAlignment': _chartAlignmentToString(chartAlignment),
       'legendPosition': _legendPositionToString(legendPosition),
+      'defaultSliceAnimationDuration': defaultSliceAnimationDuration.inMilliseconds,
+      'defaultSliceAnimationTrigger': PieSliceAnimationConfig._triggerToString(defaultSliceAnimationTrigger),
+      'defaultDelayBeforeNext': defaultDelayBeforeNext.inMilliseconds,
+      'defaultPopOutOffset': defaultPopOutOffset,
+      'sliceAnimationsEnabled': sliceAnimationsEnabled,
     };
   }
 
@@ -478,6 +613,11 @@ class PieChartStyle {
     double? connectorLineStrokeWidth,
     ChartAlignment? chartAlignment,
     PieChartLegendPosition? legendPosition,
+    Duration? defaultSliceAnimationDuration,
+    SliceAnimationTrigger? defaultSliceAnimationTrigger,
+    Duration? defaultDelayBeforeNext,
+    double? defaultPopOutOffset,
+    bool? sliceAnimationsEnabled,
   }) {
     return PieChartStyle(
       defaultColors: defaultColors ?? this.defaultColors,
@@ -500,6 +640,11 @@ class PieChartStyle {
           connectorLineStrokeWidth ?? this.connectorLineStrokeWidth,
       chartAlignment: chartAlignment ?? this.chartAlignment,
       legendPosition: legendPosition ?? this.legendPosition,
+      defaultSliceAnimationDuration: defaultSliceAnimationDuration ?? this.defaultSliceAnimationDuration,
+      defaultSliceAnimationTrigger: defaultSliceAnimationTrigger ?? this.defaultSliceAnimationTrigger,
+      defaultDelayBeforeNext: defaultDelayBeforeNext ?? this.defaultDelayBeforeNext,
+      defaultPopOutOffset: defaultPopOutOffset ?? this.defaultPopOutOffset,
+      sliceAnimationsEnabled: sliceAnimationsEnabled ?? this.sliceAnimationsEnabled,
     );
   }
 }

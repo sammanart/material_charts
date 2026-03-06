@@ -468,34 +468,58 @@ class _ChartsDemoState extends State<ChartsDemo> {
   final List<Widget> _charts = [
     const LineChartExample(),
     BarChartExample(),
+    AnimatedBarChartExample(),
     NegativeBarChartExample(),
     GroupedBarChartExample(),
+    const ManuallyTriggeredBarChartExample(),
     PieChartExample(),
+    PieChartAnimationExample(),
     PopulationChartExample(),
     AreaChartExample(),
+    AnimatedAreaChartExample(),
+    AnimatedAreaSegmentChartExample(),
+    AnimatedAreaManualTriggerExample(),
+    AnimatedAreaSegmentTriggersExample(),
     const TreemapChartExample(),
     const MultiLineChartExample(),
+    AnimatedMultiLineChartExample(),
+    AnimatedSegmentMultiLineChartExample(),
+    AnimatedSegmentWithManualTriggerExample(),
+    MultiSegmentWithManualTriggersExample(),
     const StackedBarChartExample(),
     const HollowSemiCircleExample(),
     const GanttChartExample(),
     const CandlestickChartExample(),
+    const HybridChartAnimationExample(),
     const HybridChartExample(),
   ];
 
   final List<String> _chartNames = [
     'Line Chart',
     'Bar Chart',
+    'Animated Bar Chart',
     'Bar Chart (Negatives)',
     'Grouped Bar Chart',
+    'Bar Chart: Manual Triggers',
     'Pie Chart',
+    'Pie Chart Animated',
     'Population Chart',
     'Area Chart',
+    'Animated Area Chart',
+    'Animated Area (Segments)',
+    'Area Chart: Manual Triggers',
+    'Area Chart: Segments Triggers',
     'Treemap Chart',
     'Multi-Line Chart',
+    'Animated Multi-Line Chart',
+    'Multi-Line with Segment Animations',
+    'Multi-Line with Manual Triggers',
+    'Multi-Line: Line + Segments + Line',
     'Stacked Bar Chart',
     'Hollow Semi-Circle',
     'Gantt Chart',
     'Candlestick Chart',
+    'Hybrid Chart: Animation Examples',
     'Hybrid Chart (Area/Candlestick)',
   ];
 
@@ -669,6 +693,279 @@ class BarChartExample extends StatelessWidget {
   }
 }
 
+// Animated Bar Chart Example - Demonstrates new sequential animation features
+class AnimatedBarChartExample extends StatelessWidget {
+  AnimatedBarChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    // Create bar data with custom animation configurations
+    final data = [
+      // First bar: scales up first (order 0)
+      BarChartData(
+        value: 20,
+        label: 'Product A',
+        color: Colors.blue,
+        animationConfig: const BarAnimationConfig(
+          animationOrder: 0,
+          animationType: BarAnimationType.scaleUp,
+          animationTrigger: BarAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 800),
+        ),
+      ),
+      // Second bar: slides up after a 100ms delay from first
+      BarChartData(
+        value: 35,
+        label: 'Product B',
+        color: Colors.red,
+        animationConfig: const BarAnimationConfig(
+          animationOrder: 2,
+          animationType: BarAnimationType.slideUp,
+          animationTrigger: BarAnimationTrigger.afterDelay,
+          duration: Duration(milliseconds: 800),
+          delayBeforeNext: Duration(milliseconds: 100),
+        ),
+      ),
+      // Third bar: fades in at the same time as second bar
+      BarChartData(
+        value: 25,
+        label: 'Product C',
+        color: Colors.green,
+        animationConfig: const BarAnimationConfig(
+          animationOrder: 1,
+          animationType: BarAnimationType.fadeIn,
+          animationTrigger: BarAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 800),
+        ),
+      ),
+      // Fourth bar: bounces in after 100ms delay
+      BarChartData(
+        value: 40,
+        label: 'Product D',
+        color: Colors.orange,
+        animationConfig: const BarAnimationConfig(
+          animationOrder: 3,
+          animationType: BarAnimationType.bounce,
+          animationTrigger: BarAnimationTrigger.afterDelay,
+          duration: Duration(milliseconds: 800),
+          delayBeforeNext: Duration(milliseconds: 100),
+        ),
+      ),
+      // Fifth bar: slides down with custom curve
+      BarChartData(
+        value: 30,
+        label: 'Product E',
+        color: Colors.purple,
+        animationConfig: const BarAnimationConfig(
+          animationOrder: 4,
+          animationType: BarAnimationType.slideDown,
+          animationTrigger: BarAnimationTrigger.afterPrevious,
+          duration: Duration(milliseconds: 800),
+          curve: Curves.easeInOut,
+          delayBeforeNext: Duration(milliseconds: 100),
+        ),
+      ),
+    ];
+
+    const style = BarChartStyle(
+      barSpacing: 0.2,
+      gradientEffect: false,
+    );
+
+    return Column(
+      children: [
+        _buildExportHeader(
+          context,
+          'Animated Bar Chart - Sequential Animation Demo',
+          _chartKey,
+          onExportSvg: () => _exportBarChartSvg(context, data, style, 'Animated Sales'),
+        ),
+        const SizedBox(height: 20),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialBarChart(
+            data: data,
+            width: 350,
+            height: 300,
+            style: style,
+            showTooltip: true,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Example demonstrating bar chart animations with manual triggers
+class ManuallyTriggeredBarChartExample extends StatefulWidget {
+  const ManuallyTriggeredBarChartExample({Key? key}) : super(key: key);
+
+  @override
+  State<ManuallyTriggeredBarChartExample> createState() => _ManuallyTriggeredBarChartExampleState();
+}
+
+class _ManuallyTriggeredBarChartExampleState extends State<ManuallyTriggeredBarChartExample> {
+  final GlobalKey<MaterialBarChartState> _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Manual Trigger Bar Chart Animations',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Click the buttons to trigger bar animations independently.',
+          style: TextStyle(fontSize: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 16),
+        // Trigger buttons
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () => _chartKey.currentState?.triggerAnimation(0),
+              child: const Text('Animate Bar 1'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey.currentState?.triggerAnimation(1),
+              child: const Text('Animate Bar 2'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey.currentState?.triggerAnimation(2),
+              child: const Text('Animate Bar 3'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey.currentState?.triggerAnimation(3),
+              child: const Text('Animate Bar 4'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Reset buttons
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () => _chartKey.currentState?.resetAnimation(0),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+              child: const Text('Reset Bar 1'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey.currentState?.resetAnimation(1),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+              child: const Text('Reset Bar 2'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey.currentState?.resetAnimation(2),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+              child: const Text('Reset Bar 3'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey.currentState?.resetAnimation(3),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+              child: const Text('Reset Bar 4'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          height: 350,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: MaterialBarChart(
+            key: _chartKey,
+            data: [
+              BarChartData(
+                value: 20,
+                label: 'Product A',
+                color: Colors.blue,
+                animationConfig: const BarAnimationConfig(
+                  animationOrder: 0,
+                  animationType: BarAnimationType.scaleUp,
+                  animationTrigger: BarAnimationTrigger.manual,
+                  duration: Duration(milliseconds: 800),
+                ),
+              ),
+              BarChartData(
+                value: 35,
+                label: 'Product B',
+                color: Colors.red,
+                animationConfig: const BarAnimationConfig(
+                  animationOrder: 1,
+                  animationType: BarAnimationType.slideUp,
+                  animationTrigger: BarAnimationTrigger.manual,
+                  duration: Duration(milliseconds: 800),
+                ),
+              ),
+              BarChartData(
+                value: 25,
+                label: 'Product C',
+                color: Colors.green,
+                animationConfig: const BarAnimationConfig(
+                  animationOrder: 2,
+                  animationType: BarAnimationType.fadeIn,
+                  animationTrigger: BarAnimationTrigger.manual,
+                  duration: Duration(milliseconds: 800),
+                ),
+              ),
+              BarChartData(
+                value: 40,
+                label: 'Product D',
+                color: Colors.orange,
+                animationConfig: const BarAnimationConfig(
+                  animationOrder: 3,
+                  animationType: BarAnimationType.bounce,
+                  animationTrigger: BarAnimationTrigger.manual,
+                  duration: Duration(milliseconds: 800),
+                ),
+              ),
+            ],
+            width: 600,
+            height: 300,
+            style: const BarChartStyle(
+              barSpacing: 0.2,
+              gradientEffect: true,
+              gradientColors: [Colors.blue, Colors.lightBlue],
+            ),
+            showValues: true,
+            showGrid: true,
+          ),
+        ),
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+}
+
 // Grouped Bar Chart Example
 class GroupedBarChartExample extends StatelessWidget {
   GroupedBarChartExample({super.key});
@@ -765,6 +1062,166 @@ class PieChartExample extends StatelessWidget {
               style: style,
             )),
       ],
+    );
+  }
+}
+
+/// Example demonstrating pie chart slice animations with pop-out effects
+class PieChartAnimationExample extends StatefulWidget {
+  const PieChartAnimationExample({Key? key}) : super(key: key);
+
+  @override
+  State<PieChartAnimationExample> createState() => _PieChartAnimationExampleState();
+}
+
+class _PieChartAnimationExampleState extends State<PieChartAnimationExample> {
+  final GlobalKey<MaterialPieChartState> _chartKey1 = GlobalKey();
+  final GlobalKey<MaterialPieChartState> _chartKey2 = GlobalKey();
+  final GlobalKey<MaterialPieChartState> _chartKey3 = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Example 2: Manual Trigger Animations
+        _buildSectionTitle('2. Manual Trigger Animations'),
+        _buildDescription(
+          'Click the buttons to trigger slice animations independently.',
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () => _chartKey2.currentState?.triggerAnimation(0),
+              child: const Text('Animate Slice 1'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey2.currentState?.triggerAnimation(1),
+              child: const Text('Animate Slice 2'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey2.currentState?.triggerAnimation(2),
+              child: const Text('Animate Slice 3'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () => _chartKey2.currentState?.resetAnimation(0),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+              child: const Text('Reset Slice 1'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey2.currentState?.resetAnimation(1),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+              child: const Text('Reset Slice 2'),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: () => _chartKey2.currentState?.resetAnimation(2),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+              child: const Text('Reset Slice 3'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          height: 400,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: MaterialPieChart(
+            key: _chartKey2,
+            data: [
+              PieChartData(
+                value: 40,
+                label: 'Marketing',
+                color: Colors.purple,
+                animationConfig: const PieSliceAnimationConfig(
+                  animationOrder: 0,
+                  animationTrigger: SliceAnimationTrigger.manual,
+                  duration: Duration(milliseconds: 800),
+                  popOutOffset: 1.05,
+                ),
+              ),
+              PieChartData(
+                value: 30,
+                label: 'Sales',
+                color: Colors.teal,
+                animationConfig: const PieSliceAnimationConfig(
+                  animationOrder: 1,
+                  animationTrigger: SliceAnimationTrigger.manual,
+                  duration: Duration(milliseconds: 800),
+                  popOutOffset: 1.05,
+                ),
+              ),
+              PieChartData(
+                value: 30,
+                label: 'Operations',
+                color: Colors.amber,
+                animationConfig: const PieSliceAnimationConfig(
+                  animationOrder: 2,
+                  animationTrigger: SliceAnimationTrigger.manual,
+                  duration: Duration(milliseconds: 800),
+                  popOutOffset: 1.05,
+                ),
+              ),
+            ],
+            width: 600,
+            height: 400,
+            style: const PieChartStyle(
+              showLegend: false,
+              legendPosition: PieChartLegendPosition.bottom,
+              holeRadius: 0.5,
+              sliceAnimationsEnabled: true,
+            ),
+          ),
+        ),
+        const SizedBox(height: 32),
+      ],
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDescription(String description) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Text(
+        description,
+        style: TextStyle(
+          fontSize: 14,
+          color: Colors.grey[700],
+        ),
+      ),
     );
   }
 }
@@ -1064,7 +1521,7 @@ class AreaChartExample extends StatelessWidget {
         strokeWidth: 2.0,
         dashPattern: [5.0, 3.0],
       ),
-      xSpanSlots: 12,
+      xSpanSlots: 8,
     );
 
     return Column(
@@ -1085,10 +1542,459 @@ class AreaChartExample extends StatelessWidget {
             height: 250,
           ),
         ),
-        const SizedBox(height: 10),
+      ],
+    );
+  }
+}
+
+// Animated Area Chart Example - Demonstrates sequential area animation features
+class AnimatedAreaChartExample extends StatelessWidget {
+  AnimatedAreaChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    final series = [
+      AreaChartSeries(
+        name: 'Product A',
+        dataPoints: const [
+          AreaChartData(value: 10, label: 'Jan', segmentAnimationOrder: 0),
+          AreaChartData(value: 25, label: 'Feb', segmentAnimationOrder: 0),
+          AreaChartData(value: 20, label: 'Mar', segmentAnimationOrder: 0),
+          AreaChartData(value: 35, label: 'Apr', segmentAnimationOrder: 0),
+          AreaChartData(value: 40, label: 'May', segmentAnimationOrder: 1),
+          AreaChartData(value: 38, label: 'Jun', segmentAnimationOrder: 2),
+        ],
+        color: Colors.blue,
+        gradientColor: Colors.blue.withValues(alpha: 0),
+        animationConfig: const AreaAnimationConfig(
+          animationOrder: 0,
+          animationType: AreaAnimationType.drawLine,
+          animationTrigger: AreaAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1000),
+        ),
+      ),
+      AreaChartSeries(
+        name: 'Product B',
+        dataPoints: const [
+          AreaChartData(value: 5, label: 'Jan', segmentAnimationOrder: 0),
+          AreaChartData(value: 12, label: 'Feb', segmentAnimationOrder: 0),
+          AreaChartData(value: 18, label: 'Mar', segmentAnimationOrder: 0),
+          AreaChartData(value: 22, label: 'Apr', segmentAnimationOrder: 0),
+          AreaChartData(value: 28, label: 'May', segmentAnimationOrder: 1),
+          AreaChartData(value: 30, label: 'Jun', segmentAnimationOrder: 2),
+        ],
+        color: Colors.red,
+        gradientColor: Colors.red.withValues(alpha: 0),
+        animationConfig: const AreaAnimationConfig(
+          animationOrder: 1,
+          animationType: AreaAnimationType.fadeIn,
+          animationTrigger: AreaAnimationTrigger.afterDelay,
+          duration: Duration(milliseconds: 900),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+      ),
+      AreaChartSeries(
+        name: 'Product C',
+        dataPoints: const [
+          AreaChartData(value: 15, label: 'Jan', segmentAnimationOrder: 0),
+          AreaChartData(value: 18, label: 'Feb', segmentAnimationOrder: 0),
+          AreaChartData(value: 22, label: 'Mar', segmentAnimationOrder: 0),
+          AreaChartData(value: 28, label: 'Apr', segmentAnimationOrder: 0),
+          AreaChartData(value: 34, label: 'May', segmentAnimationOrder: 1),
+          AreaChartData(value: 36, label: 'Jun', segmentAnimationOrder: 2),
+        ],
+        color: Colors.green,
+        gradientColor: Colors.green.withValues(alpha: 0),
+        animationConfig: const AreaAnimationConfig(
+          animationOrder: 2,
+          animationType: AreaAnimationType.slideUp,
+          animationTrigger: AreaAnimationTrigger.afterDelay,
+          duration: Duration(milliseconds: 900),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+      ),
+    ];
+
+    final style = AreaChartStyle(
+      colors: const [Colors.blue, Colors.red, Colors.green],
+      showPoints: true,
+      showGrid: true,
+      forceYAxisFromZero: true,
+      defaultAnimationTrigger: AreaAnimationTrigger.afterDelay,
+      defaultDelayBeforeNext: const Duration(milliseconds: 150),
+      segmentAnimationConfigs: {
+        1: const SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: AreaAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 600),
+          delayBeforeNext: Duration(milliseconds: 100),
+        ),
+        2: const SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.slideUp,
+          animationTrigger: AreaAnimationTrigger.afterPrevious,
+          duration: Duration(milliseconds: 600),
+          delayBeforeNext: Duration(milliseconds: 100),
+        ),
+      },
+    );
+
+    return Column(
+      children: [
+        _buildExportHeader(
+          context,
+          'Animated Area Chart - Sequential Animation Demo',
+          _chartKey,
+          onExportSvg: () => _exportAreaChartSvg(context, series, style, 'Animated Area Trends'),
+        ),
+        const SizedBox(height: 20),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialAreaChart(
+            series: series,
+            width: 350,
+            height: 250,
+            style: style,
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+}
+
+// Animated Area Chart with Segment Animations
+class AnimatedAreaSegmentChartExample extends StatelessWidget {
+  AnimatedAreaSegmentChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    final series = [
+      AreaChartSeries(
+        name: 'Sales',
+        dataPoints: const [
+          AreaChartData(value: 12, label: 'Jan', segmentAnimationOrder: 0),
+          AreaChartData(value: 20, label: 'Feb', segmentAnimationOrder: 0),
+          AreaChartData(value: 18, label: 'Mar', segmentAnimationOrder: 0),
+          AreaChartData(value: 28, label: 'Apr', segmentAnimationOrder: 1),
+          AreaChartData(value: 35, label: 'May', segmentAnimationOrder: 1),
+          AreaChartData(value: 33, label: 'Jun', segmentAnimationOrder: 2),
+          AreaChartData(value: 40, label: 'Jul', segmentAnimationOrder: 3),
+          AreaChartData(value: 44, label: 'Aug', segmentAnimationOrder: 3),
+        ],
+        color: Colors.blue,
+        gradientColor: Colors.blue.withValues(alpha: 0),
+        animationConfig: const AreaAnimationConfig(
+          animationOrder: 0,
+          animationType: AreaAnimationType.drawLine,
+          animationTrigger: AreaAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1000),
+        ),
+      ),
+      AreaChartSeries(
+        name: 'Profit',
+        dataPoints: const [
+          AreaChartData(value: 8, label: 'Jan', segmentAnimationOrder: 0),
+          AreaChartData(value: 12, label: 'Feb', segmentAnimationOrder: 0),
+          AreaChartData(value: 14, label: 'Mar', segmentAnimationOrder: 0),
+          AreaChartData(value: 19, label: 'Apr', segmentAnimationOrder: 1),
+          AreaChartData(value: 24, label: 'May', segmentAnimationOrder: 1),
+          AreaChartData(value: 26, label: 'Jun', segmentAnimationOrder: 2),
+          AreaChartData(value: 31, label: 'Jul', segmentAnimationOrder: 3),
+          AreaChartData(value: 34, label: 'Aug', segmentAnimationOrder: 3),
+        ],
+        color: Colors.green,
+        gradientColor: Colors.green.withValues(alpha: 0),
+        animationConfig: const AreaAnimationConfig(
+          animationOrder: 0,
+          animationType: AreaAnimationType.fadeIn,
+          animationTrigger: AreaAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1000),
+        ),
+      ),
+    ];
+
+    final style = AreaChartStyle(
+      colors: const [Colors.blue, Colors.green],
+      showPoints: true,
+      showGrid: true,
+      forceYAxisFromZero: true,
+      defaultAnimationTrigger: AreaAnimationTrigger.afterDelay,
+      defaultDelayBeforeNext: const Duration(milliseconds: 120),
+      segmentAnimationConfigs: {
+        1: const SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: AreaAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 600),
+          delayBeforeNext: Duration(milliseconds: 120),
+        ),
+        2: const SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.slideUp,
+          animationTrigger: AreaAnimationTrigger.afterPrevious,
+          duration: Duration(milliseconds: 650),
+          delayBeforeNext: Duration(milliseconds: 120),
+        ),
+        3: const SegmentAnimationConfig(
+          segmentAnimationOrder: 3,
+          animationType: SegmentAnimationType.fadeIn,
+          animationTrigger: AreaAnimationTrigger.afterPrevious,
+          duration: Duration(milliseconds: 700),
+          delayBeforeNext: Duration(milliseconds: 120),
+        ),
+      },
+    );
+
+    return Column(
+      children: [
+        _buildExportHeader(
+          context,
+          'Animated Area Chart - Segment Animation Demo',
+          _chartKey,
+          onExportSvg: () => _exportAreaChartSvg(context, series, style, 'Animated Area Segment Demo'),
+        ),
+        const SizedBox(height: 20),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialAreaChart(
+            series: series,
+            width: 350,
+            height: 250,
+            style: style,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Animated Area Chart with Manual Triggers
+class AnimatedAreaManualTriggerExample extends StatefulWidget {
+  AnimatedAreaManualTriggerExample({super.key});
+
+  @override
+  State<AnimatedAreaManualTriggerExample> createState() => _AnimatedAreaManualTriggerExampleState();
+}
+
+class _AnimatedAreaManualTriggerExampleState extends State<AnimatedAreaManualTriggerExample> {
+  final GlobalKey<MaterialAreaChartState> _chartKey = GlobalKey<MaterialAreaChartState>();
+
+  @override
+  Widget build(BuildContext context) {
+    final series = [
+      AreaChartSeries(
+        name: 'Revenue',
+        dataPoints: const [
+          AreaChartData(value: 15, label: 'Q1', segmentAnimationOrder: 0),
+          AreaChartData(value: 22, label: 'Q2', segmentAnimationOrder: 0),
+          AreaChartData(value: 28, label: 'Q3', segmentAnimationOrder: 1),
+          AreaChartData(value: 35, label: 'Q4', segmentAnimationOrder: 2),
+        ],
+        color: Colors.blue,
+        gradientColor: Colors.blue.withValues(alpha: 0),
+        animationConfig: const AreaAnimationConfig(
+          animationOrder: 0,
+          animationType: AreaAnimationType.fadeIn,
+          animationTrigger: AreaAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1200),
+        ),
+      ),
+      AreaChartSeries(
+        name: 'Expenses',
+        dataPoints: const [
+          AreaChartData(value: 8, label: 'Q1', segmentAnimationOrder: 0),
+          AreaChartData(value: 12, label: 'Q2', segmentAnimationOrder: 0),
+          AreaChartData(value: 16, label: 'Q3', segmentAnimationOrder: 1),
+          AreaChartData(value: 20, label: 'Q4', segmentAnimationOrder: 2),
+        ],
+        color: Colors.red,
+        gradientColor: Colors.red.withValues(alpha: 0),
+        animationConfig: const AreaAnimationConfig(
+          animationOrder: 0,
+          animationType: AreaAnimationType.fadeIn,
+          animationTrigger: AreaAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1200),
+        ),
+      ),
+    ];
+
+    final style = AreaChartStyle(
+      colors: const [Colors.blue, Colors.red],
+      showPoints: true,
+      showGrid: true,
+      forceYAxisFromZero: true,
+      defaultAnimationTrigger: AreaAnimationTrigger.manual,
+      segmentAnimationConfigs: {
+        1: const SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.fadeIn,
+          animationTrigger: AreaAnimationTrigger.manual,
+          duration: Duration(milliseconds: 800),
+        ),
+        2: const SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.fadeIn,
+          animationTrigger: AreaAnimationTrigger.manual,
+          duration: Duration(milliseconds: 800),
+        ),
+      },
+    );
+
+    return Column(
+      children: [
         const Text(
-          'Hover over markers to see key events with custom tooltip styling',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
+          'Area Chart - Manual Trigger Demo (FadeIn)',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          height: 300,
+          width: 350,
+          child: MaterialAreaChart(
+            key: _chartKey,
+            series: series,
+            width: 350,
+            height: 250,
+            style: style,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () {
+                _chartKey.currentState?.triggerAnimation(1);
+              },
+              child: const Text('Trigger Segment 1 FadeIn'),
+            ),
+            const SizedBox(width: 12),
+            ElevatedButton(
+              onPressed: () {
+                _chartKey.currentState?.triggerAnimation(2);
+              },
+              child: const Text('Trigger Segment 2 (FadeIn)'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Example with line animation followed by 3 buttons to trigger segment animations
+class AnimatedAreaSegmentTriggersExample extends StatefulWidget {
+  const AnimatedAreaSegmentTriggersExample({super.key});
+
+  @override
+  State<AnimatedAreaSegmentTriggersExample> createState() => _AnimatedAreaSegmentTriggersExampleState();
+}
+
+class _AnimatedAreaSegmentTriggersExampleState extends State<AnimatedAreaSegmentTriggersExample> {
+  final GlobalKey<MaterialAreaChartState> _chartKey = GlobalKey<MaterialAreaChartState>();
+
+  void _triggerSegment(int segmentOrder) {
+    final state = _chartKey.currentState;
+    if (state != null) {
+      state.triggerAnimation(segmentOrder);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = [
+      const AreaChartData(value: 10, label: 'Jan', segmentAnimationOrder: 0),
+      const AreaChartData(value: 20, label: 'Feb', segmentAnimationOrder: 0),
+      const AreaChartData(value: 15, label: 'Mar', segmentAnimationOrder: 0),
+      const AreaChartData(value: 25, label: 'Apr', segmentAnimationOrder: 1),
+      const AreaChartData(value: 30, label: 'May', segmentAnimationOrder: 1),
+      const AreaChartData(value: 28, label: 'Jun', segmentAnimationOrder: 1),
+      const AreaChartData(value: 35, label: 'Jul', segmentAnimationOrder: 2),
+      const AreaChartData(value: 40, label: 'Aug', segmentAnimationOrder: 2),
+      const AreaChartData(value: 38, label: 'Sep', segmentAnimationOrder: 2),
+    ];
+
+    final series = [
+      AreaChartSeries(
+        name: 'Growth Metrics',
+        dataPoints: data,
+        color: Colors.blue,
+        gradientColor: Colors.blue.withValues(alpha: 0),
+        animationConfig: const AreaAnimationConfig(
+          animationOrder: 0,
+          animationType: AreaAnimationType.drawLine,
+          animationTrigger: AreaAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1500),
+        ),
+      ),
+    ];
+
+    final style = AreaChartStyle(
+      showGrid: true,
+      forceYAxisFromZero: true,
+      defaultAnimationTrigger: AreaAnimationTrigger.manual,
+      segmentAnimationConfigs: {
+        1: SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.slideUp,
+          duration: const Duration(milliseconds: 800),
+          animationTrigger: AreaAnimationTrigger.manual,
+        ),
+        2: SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.fadeIn,
+          duration: const Duration(milliseconds: 800),
+          animationTrigger: AreaAnimationTrigger.manual,
+        ),
+      },
+    );
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Line Animation + Segment Triggers',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        MaterialAreaChart(
+          key: _chartKey,
+          style: style,
+          series: series,
+          width: 350,
+          height: 250,
+        ),
+        const SizedBox(height: 20),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () {
+                _chartKey.currentState?.triggerAnimation(1);
+              },
+              child: const Text('Trigger Segment 1 SlideUp'),
+            ),
+            const SizedBox(width: 12),
+            ElevatedButton(
+              onPressed: () {
+                _chartKey.currentState?.triggerAnimation(2);
+              },
+              child: const Text('Trigger Segment 2 (FadeIn)'),
+            ),
+          ],
         ),
       ],
     );
@@ -1214,6 +2120,452 @@ class MultiLineChartExample extends StatelessWidget {
           style: style,
           height: 300,
           width: 350,
+        ),
+      ],
+    );
+  }
+}
+
+// Animated Multi-Line Chart Example
+class AnimatedMultiLineChartExample extends StatelessWidget {
+  AnimatedMultiLineChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    // Create line series with custom animation configurations
+    final series = [
+      ChartSeries(
+        name: 'Product A',
+        dataPoints: const [
+          ChartDataPoint(value: 10, label: 'Jan'),
+          ChartDataPoint(value: 25, label: 'Feb'),
+          ChartDataPoint(value: 20, label: 'Mar'),
+          ChartDataPoint(value: 35, label: 'Apr'),
+        ],
+        color: Colors.blue,
+        animationConfig: const LineAnimationConfig(
+          animationOrder: 0,
+          animationType: LineAnimationType.drawLine,
+          animationTrigger: LineAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1000),
+        ),
+      ),
+      ChartSeries(
+        name: 'Product B',
+        dataPoints: const [
+          ChartDataPoint(value: 5, label: 'Jan'),
+          ChartDataPoint(value: 12, label: 'Feb'),
+          ChartDataPoint(value: 18, label: 'Mar'),
+          ChartDataPoint(value: 22, label: 'Apr'),
+        ],
+        color: Colors.red,
+        animationConfig: const LineAnimationConfig(
+          animationOrder: 1,
+          animationType: LineAnimationType.fadeIn,
+          animationTrigger: LineAnimationTrigger.afterDelay,
+          duration: Duration(milliseconds: 900),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+      ),
+      ChartSeries(
+        name: 'Product C',
+        dataPoints: const [
+          ChartDataPoint(value: 15, label: 'Jan'),
+          ChartDataPoint(value: 18, label: 'Feb'),
+          ChartDataPoint(value: 22, label: 'Mar'),
+          ChartDataPoint(value: 28, label: 'Apr'),
+        ],
+        color: Colors.green,
+        animationConfig: const LineAnimationConfig(
+          animationOrder: 2,
+          animationType: LineAnimationType.drawLine,
+          animationTrigger: LineAnimationTrigger.afterDelay,
+          duration: Duration(milliseconds: 900),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+      ),
+    ];
+
+    final style = MultiLineChartStyle(
+      colors: const [Colors.blue, Colors.red, Colors.green],
+      showLegend: true,
+      defaultAnimationType: LineAnimationType.drawLine,
+      defaultAnimationTrigger: LineAnimationTrigger.afterDelay,
+      defaultAnimationDuration: const Duration(milliseconds: 900),
+      defaultDelayBeforeNext: const Duration(milliseconds: 150),
+    );
+
+    return Column(
+      children: [
+        _buildExportHeader(
+          context,
+          'Animated Multi-Line Chart - Sequential Animation Demo',
+          _chartKey,
+          onExportSvg: () => _exportMultiLineChartSvg(context, series, style, 'Animated Product Trends'),
+        ),
+        const SizedBox(height: 20),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MultiLineChart(
+            series: series,
+            style: style,
+            height: 300,
+            width: 350,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Animated Multi-Line Chart with Segment Animations
+class AnimatedSegmentMultiLineChartExample extends StatelessWidget {
+  AnimatedSegmentMultiLineChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    // Create line series with progressive segment animations
+    // Segment 0 (Jan-Apr): Drawn during line animation phase (no explicit config)
+    // Segment 1 (Apr-May): Revealed after line animation completes
+    // Segment 2 (May-Jun): Revealed after segment 1 completes
+    final series = [
+      ChartSeries(
+        name: 'Line 1',
+        dataPoints: [
+          const ChartDataPoint(value: 10, label: 'Jan', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 25, label: 'Feb', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 20, label: 'Mar', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 35, label: 'Apr', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 40, label: 'May', segmentAnimationOrder: 1),
+          const ChartDataPoint(value: 38, label: 'Jun', segmentAnimationOrder: 2),
+        ],
+        color: Colors.blue,
+        animationConfig: const LineAnimationConfig(
+          animationOrder: 0,
+          animationType: LineAnimationType.drawLine,
+          animationTrigger: LineAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1000),
+        ),
+      ),
+      ChartSeries(
+        name: 'Line 2',
+        dataPoints: [
+          const ChartDataPoint(value: 5, label: 'Jan', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 12, label: 'Feb', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 18, label: 'Mar', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 22, label: 'Apr', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 28, label: 'May', segmentAnimationOrder: 1),
+          const ChartDataPoint(value: 30, label: 'Jun', segmentAnimationOrder: 2),
+        ],
+        color: Colors.red,
+        animationConfig: const LineAnimationConfig(
+          animationOrder: 0,
+          animationType: LineAnimationType.fadeIn,
+          animationTrigger: LineAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1000),
+        ),
+      ),
+    ];
+
+    final style = MultiLineChartStyle(
+      colors: const [Colors.blue, Colors.red],
+      showLegend: true,
+      // Progressive segment animation configurations
+      // Segment 0 has NO config, so it's drawn during line animation phase
+      // Segments 1 and 2 have explicit configs, so they animate separately AFTER line completes
+      segmentAnimationConfigs: {
+        1: const SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: LineAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 600),
+          delayBeforeNext: Duration(milliseconds: 100),
+        ),
+        2: const SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.slideUp,
+          animationTrigger: LineAnimationTrigger.afterPrevious,
+          duration: Duration(milliseconds: 600),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+      },
+    );
+
+    return Column(
+      children: [
+        _buildExportHeader(
+          context,
+          'Animated Multi-Line Chart - Segment Animations Demo',
+          _chartKey,
+        ),
+        const SizedBox(height: 20),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MultiLineChart(
+            series: series,
+            style: style,
+            height: 300,
+            width: 350,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Manual Trigger Multi-Line Chart Example
+class AnimatedSegmentWithManualTriggerExample extends StatefulWidget {
+  AnimatedSegmentWithManualTriggerExample({super.key});
+
+  @override
+  State<AnimatedSegmentWithManualTriggerExample> createState() => _AnimatedSegmentWithManualTriggerExampleState();
+}
+
+class _AnimatedSegmentWithManualTriggerExampleState extends State<AnimatedSegmentWithManualTriggerExample> {
+  final GlobalKey<MultiLineChartState> _chartKey = GlobalKey<MultiLineChartState>();
+
+  @override
+  Widget build(BuildContext context) {
+    // Create line series with THREE animation orders that require manual triggers
+    // Order 0: Line animation phase (complete with segment 0)
+    // Order 1: Segment 1 animation (triggered by button)
+    // Order 2: Segment 2 animation (triggered by button)
+    final series = [
+      ChartSeries(
+        name: 'Product A',
+        dataPoints: [
+          const ChartDataPoint(value: 10, label: 'Jan', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 25, label: 'Feb', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 20, label: 'Mar', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 35, label: 'Apr', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 40, label: 'May', segmentAnimationOrder: 1),
+          const ChartDataPoint(value: 38, label: 'Jun', segmentAnimationOrder: 2),
+        ],
+        color: Colors.blue,
+        animationConfig: const LineAnimationConfig(
+          animationOrder: 0,
+          animationType: LineAnimationType.drawLine,
+          animationTrigger: LineAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1200),
+        ),
+      ),
+      ChartSeries(
+        name: 'Product B',
+        dataPoints: [
+          const ChartDataPoint(value: 5, label: 'Jan', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 12, label: 'Feb', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 18, label: 'Mar', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 22, label: 'Apr', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 28, label: 'May', segmentAnimationOrder: 1),
+          const ChartDataPoint(value: 30, label: 'Jun', segmentAnimationOrder: 2),
+        ],
+        color: Colors.red,
+        animationConfig: const LineAnimationConfig(
+          animationOrder: 0,
+          animationType: LineAnimationType.fadeIn,
+          animationTrigger: LineAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1200),
+        ),
+      ),
+    ];
+
+    final style = MultiLineChartStyle(
+      colors: const [Colors.blue, Colors.red],
+      showLegend: true,
+      segmentAnimationConfigs: {
+        1: const SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: LineAnimationTrigger.manual,
+          duration: Duration(milliseconds: 700),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+        2: const SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.slideUp,
+          animationTrigger: LineAnimationTrigger.manual,
+          duration: Duration(milliseconds: 700),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+      },
+    );
+
+    return Column(
+      children: [
+        const Text(
+          'Animated Multi-Line Chart - Manual Trigger Demo',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          height: 300,
+          width: 350,
+          child: MultiLineChart(
+            key: _chartKey,
+            series: series,
+            style: style,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () {
+                // Trigger segment 1 animation manually
+                _chartKey.currentState?.triggerAnimation(1);
+              },
+              child: const Text('Add May Data'),
+            ),
+            const SizedBox(width: 12),
+            ElevatedButton(
+              onPressed: () {
+                // Trigger segment 2 animation manually
+                _chartKey.currentState?.triggerAnimation(2);
+              },
+              child: const Text('Add Jun Data'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// Multi-Segment with Progressive Manual Triggers Example
+class MultiSegmentWithManualTriggersExample extends StatefulWidget {
+  MultiSegmentWithManualTriggersExample({super.key});
+
+  @override
+  State<MultiSegmentWithManualTriggersExample> createState() => _MultiSegmentWithManualTriggersExampleState();
+}
+
+class _MultiSegmentWithManualTriggersExampleState extends State<MultiSegmentWithManualTriggersExample> {
+  final GlobalKey<MultiLineChartState> _chartKey = GlobalKey<MultiLineChartState>();
+
+  @override
+  Widget build(BuildContext context) {
+    // Create line series with four animation phases:
+    // Phase 0: Initial line (Jan-Apr) - auto-animated
+    // Phase 1: First segment (Apr-May) - manual trigger
+    // Phase 2: Second segment (May-Jun) - manual trigger
+    // Phase 3: Final line (Jun-Aug) - manual trigger
+    final series = [
+      ChartSeries(
+        name: 'Sales',
+        dataPoints: [
+          const ChartDataPoint(value: 10, label: 'Jan', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 25, label: 'Feb', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 20, label: 'Mar', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 35, label: 'Apr', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 40, label: 'May', segmentAnimationOrder: 1),
+          const ChartDataPoint(value: 38, label: 'Jun', segmentAnimationOrder: 2),
+          const ChartDataPoint(value: 45, label: 'Jul', segmentAnimationOrder: 3),
+          const ChartDataPoint(value: 50, label: 'Aug', segmentAnimationOrder: 3),
+        ],
+        color: Colors.blue,
+        animationConfig: const LineAnimationConfig(
+          animationOrder: 0,
+          animationType: LineAnimationType.drawLine,
+          animationTrigger: LineAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1200),
+        ),
+      ),
+      ChartSeries(
+        name: 'Profit',
+        dataPoints: [
+          const ChartDataPoint(value: 5, label: 'Jan', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 12, label: 'Feb', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 18, label: 'Mar', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 22, label: 'Apr', segmentAnimationOrder: 0),
+          const ChartDataPoint(value: 28, label: 'May', segmentAnimationOrder: 1),
+          const ChartDataPoint(value: 30, label: 'Jun', segmentAnimationOrder: 2),
+          const ChartDataPoint(value: 35, label: 'Jul', segmentAnimationOrder: 3),
+          const ChartDataPoint(value: 38, label: 'Aug', segmentAnimationOrder: 3),
+        ],
+        color: Colors.red,
+        animationConfig: const LineAnimationConfig(
+          animationOrder: 0,
+          animationType: LineAnimationType.fadeIn,
+          animationTrigger: LineAnimationTrigger.immediate,
+          duration: Duration(milliseconds: 1200),
+        ),
+      ),
+    ];
+
+    final style = MultiLineChartStyle(
+      colors: const [Colors.blue, Colors.red],
+      showLegend: true,
+      segmentAnimationConfigs: {
+        1: const SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: LineAnimationTrigger.manual,
+          duration: Duration(milliseconds: 600),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+        2: const SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.slideUp,
+          animationTrigger: LineAnimationTrigger.manual,
+          duration: Duration(milliseconds: 600),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+        3: const SegmentAnimationConfig(
+          segmentAnimationOrder: 3,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: LineAnimationTrigger.manual,
+          duration: Duration(milliseconds: 800),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+      },
+    );
+
+    return Column(
+      children: [
+        const Text(
+          'Multi-Segment with Progressive Triggers',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          height: 300,
+          width: 350,
+          child: MultiLineChart(
+            key: _chartKey,
+            series: series,
+            style: style,
+          ),
+        ),
+        const SizedBox(height: 20),
+        Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton(
+              onPressed: () {
+                _chartKey.currentState?.triggerAnimation(1);
+              },
+              child: const Text('Add May Data'),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () {
+                _chartKey.currentState?.triggerAnimation(2);
+              },
+              child: const Text('Add Jun Data'),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: () {
+                _chartKey.currentState?.triggerAnimation(3);
+              },
+              child: const Text('Complete: Add Jul-Aug Data'),
+            ),
+          ],
         ),
       ],
     );
@@ -1489,6 +2841,815 @@ class CandlestickChartExample extends StatelessWidget {
           data: data,
           width: 350,
           height: 300,
+        ),
+      ],
+    );
+  }
+}
+
+// Hybrid Chart Animation Example - Demonstrates delay-based and trigger-based animations
+class HybridChartAnimationExample extends StatefulWidget {
+  const HybridChartAnimationExample({super.key});
+
+  @override
+  State<HybridChartAnimationExample> createState() => _HybridChartAnimationExampleState();
+}
+
+class _HybridChartAnimationExampleState extends State<HybridChartAnimationExample> {
+  late List<HybridChartData> _priceData;
+
+  @override
+  void initState() {
+    super.initState();
+    _priceData = _buildPriceData();
+  }
+
+  /// Build sample price data for hybrid chart
+  List<HybridChartData> _buildPriceData() {
+    return [
+      HybridChartData(label: 'Mon', open: 100, high: 115, low: 95, close: 105, volume: 10500),
+      HybridChartData(label: 'Tue', open: 105, high: 120, low: 100, close: 110, volume: 11000),
+      HybridChartData(label: 'Wed', open: 110, high: 125, low: 105, close: 115, volume: 11500),
+      HybridChartData(label: 'Thu', open: 115, high: 118, low: 108, close: 112, volume: 11200),
+      HybridChartData(label: 'Fri', open: 112, high: 122, low: 110, close: 120, volume: 12000),
+      HybridChartData(label: 'Mon', open: 120, high: 128, low: 115, close: 125, volume: 12500),
+      HybridChartData(label: 'Tue', open: 125, high: 130, low: 120, close: 128, volume: 12800),
+      HybridChartData(label: 'Wed', open: 128, high: 135, low: 122, close: 132, volume: 13200),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          // ===== SECTION 1: Delay-Based Animations =====
+          _buildDelayBasedSection(),
+          const SizedBox(height: 40),
+
+          // ===== SECTION 2: Alternative Animation Styles =====
+          _buildAlternativeSection(),
+          const SizedBox(height: 40),
+
+          // ===== SECTION 3: Manual Trigger Animations =====
+          _buildManualTriggerSection(),
+          const SizedBox(height: 40),
+
+          // ===== SECTION 4: Segment Animations =====
+          _buildSegmentAnimationSection(),
+          const SizedBox(height: 40),
+
+          // ===== SECTION 5: All Manual Segment Animations =====
+          _buildAllManualSegmentAnimationSection(),
+        ],
+      ),
+    );
+  }
+
+  /// Section 1: Hybrid Chart with Delay-Based Sequential Animations
+  Widget _buildDelayBasedSection() {
+    // First series: animates immediately
+    final series1 = HybridChartSeries(
+      name: 'Price Series 1',
+      dataPoints: _priceData,
+      color: Colors.blue,
+      lineWidth: 2.0,
+      showPoints: true,
+      pointSize: 6.0,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 0,
+        animationType: AreaAnimationType.drawLine,
+        animationTrigger: AreaAnimationTrigger.afterDelay,
+        duration: Duration(milliseconds: 1200),
+        delayBeforeNext: Duration(milliseconds: 500),
+      ),
+    );
+
+    // Second series: animates after a 500ms delay from the first
+    final series2 = HybridChartSeries(
+      name: 'Price Series 2',
+      dataPoints: _priceData.map((p) => p.copyWithCandlestickValue(HybridCandlestickValueType.close, p.close + 5)).toList(),
+      color: Colors.green,
+      lineWidth: 2.0,
+      showPoints: true,
+      pointSize: 6.0,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 1,
+        animationType: AreaAnimationType.slideUp,
+        animationTrigger: AreaAnimationTrigger.afterDelay,
+        duration: Duration(milliseconds: 1200),
+        delayBeforeNext: Duration(milliseconds: 500),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Hybrid Chart - Delay-Based Sequential Animations',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Multiple series animate sequentially with automatic delays between them.',
+          style: TextStyle(fontSize: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            height: 350,
+            child: MaterialHybridChart(
+              series: [series1, series2],
+              width: 600,
+              height: 350,
+              style: const HybridChartStyle(
+                colors: [Colors.blue, Colors.green],
+                animationDuration: Duration(milliseconds: 1200),
+                animationCurve: Curves.easeInOut,
+                padding: EdgeInsets.fromLTRB(10, 20, 60, 20),
+                showGrid: true,
+                autoHorizontalGridLines: 4,
+                autoVerticalGridLines: 4,
+                defaultAnimationType: AreaAnimationType.drawLine,
+                defaultAnimationTrigger: AreaAnimationTrigger.afterDelay,
+                defaultDelayBeforeNext: Duration(milliseconds: 500),
+              ),
+              axisConfig: const HybridChartAxisConfig(
+                priceDivisions: 5,
+                dateDivisions: 4,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Section 2: Alternative Animation Styles (Immediate and FadeIn)
+  Widget _buildAlternativeSection() {
+    // Series with immediate animation
+    final series1 = HybridChartSeries(
+      name: 'Immediate Series',
+      dataPoints: _priceData,
+      color: Colors.purple,
+      lineWidth: 2.0,
+      showPoints: true,
+      pointSize: 6.0,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 0,
+        animationType: AreaAnimationType.fadeIn,
+        animationTrigger: AreaAnimationTrigger.immediate,
+        duration: Duration(milliseconds: 1000),
+      ),
+    );
+
+    // Series with fade animation
+    final series2 = HybridChartSeries(
+      name: 'Fade Series',
+      dataPoints: _priceData.map((p) => p.copyWithCandlestickValue(HybridCandlestickValueType.close, p.close + 8)).toList(),
+      color: Colors.orange,
+      lineWidth: 2.0,
+      showPoints: true,
+      pointSize: 6.0,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 0,
+        animationType: AreaAnimationType.fadeIn,
+        animationTrigger: AreaAnimationTrigger.immediate,
+        duration: Duration(milliseconds: 1000),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Hybrid Chart - Simultaneous Animations',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Multiple series animate simultaneously using FadeIn animation.',
+          style: TextStyle(fontSize: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            height: 350,
+            child: MaterialHybridChart(
+              series: [series1, series2],
+              width: 600,
+              height: 350,
+              style: const HybridChartStyle(
+                colors: [Colors.purple, Colors.orange],
+                animationDuration: Duration(milliseconds: 1000),
+                animationCurve: Curves.easeIn,
+                padding: EdgeInsets.fromLTRB(10, 20, 60, 20),
+                showGrid: true,
+                autoHorizontalGridLines: 4,
+                autoVerticalGridLines: 4,
+                defaultAnimationType: AreaAnimationType.fadeIn,
+                defaultAnimationTrigger: AreaAnimationTrigger.immediate,
+              ),
+              axisConfig: const HybridChartAxisConfig(
+                priceDivisions: 5,
+                dateDivisions: 4,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Section 3: Hybrid Chart with Manual Trigger Animations
+  Widget _buildManualTriggerSection() {
+    return _ManualTriggerHybridChartWidget(priceData: _priceData);
+  }
+
+  /// Section 4: Hybrid Chart with Segment Animations
+  Widget _buildSegmentAnimationSection() {
+    return _SegmentAnimationHybridChartWidget(priceData: _priceData);
+  }
+
+  /// Section 5: Hybrid Chart with All Manual Segment Animations
+  Widget _buildAllManualSegmentAnimationSection() {
+    return _AllManualSegmentAnimationHybridChartWidget(priceData: _priceData);
+  }
+}
+
+// Manual Trigger Hybrid Chart Widget
+class _ManualTriggerHybridChartWidget extends StatefulWidget {
+  final List<HybridChartData> priceData;
+
+  const _ManualTriggerHybridChartWidget({required this.priceData});
+
+  @override
+  State<_ManualTriggerHybridChartWidget> createState() => _ManualTriggerHybridChartWidgetState();
+}
+
+class _ManualTriggerHybridChartWidgetState extends State<_ManualTriggerHybridChartWidget> {
+  late GlobalKey<State> _chartKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _chartKey = GlobalKey<State>();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Series with manual trigger
+    final series1 = HybridChartSeries(
+      name: 'Manual Trigger Series 1',
+      dataPoints: widget.priceData,
+      color: Colors.amber,
+      lineWidth: 2.0,
+      showPoints: true,
+      pointSize: 6.0,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 0,
+        animationType: AreaAnimationType.drawLine,
+        animationTrigger: AreaAnimationTrigger.manual,
+        duration: Duration(milliseconds: 1000),
+      ),
+    );
+
+    // Second series with manual trigger
+    final series2 = HybridChartSeries(
+      name: 'Manual Trigger Series 2',
+      dataPoints: widget.priceData.map((p) => p.copyWithCandlestickValue(HybridCandlestickValueType.close, p.close + 10)).toList(),
+      color: Colors.cyan,
+      lineWidth: 2.0,
+      showPoints: true,
+      pointSize: 6.0,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 1,
+        animationType: AreaAnimationType.slideUp,
+        animationTrigger: AreaAnimationTrigger.manual,
+        duration: Duration(milliseconds: 1000),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Hybrid Chart - Manual Trigger Animations',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Use buttons to manually trigger animations for each series or all at once.',
+          style: TextStyle(fontSize: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 16),
+        // Control buttons in a responsive grid
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).triggerAnimation(0);
+                }
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Animate Series 1'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.black87,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).triggerAnimation(1);
+                }
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Animate Series 2'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.cyan,
+                foregroundColor: Colors.black87,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).triggerAnimation(0);
+                  (state as dynamic).triggerAnimation(1);
+                }
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Animate All'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _chartKey = GlobalKey<State>();
+                });
+              },
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Reset'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            height: 350,
+            child: MaterialHybridChart(
+              key: _chartKey,
+              series: [series1, series2],
+              width: 600,
+              height: 350,
+              style: const HybridChartStyle(
+                colors: [Colors.amber, Colors.cyan],
+                animationDuration: Duration(milliseconds: 1000),
+                animationCurve: Curves.easeInOut,
+                padding: EdgeInsets.fromLTRB(10, 20, 60, 20),
+                showGrid: true,
+                autoHorizontalGridLines: 4,
+                autoVerticalGridLines: 4,
+                defaultAnimationTrigger: AreaAnimationTrigger.manual,
+              ),
+              axisConfig: const HybridChartAxisConfig(
+                priceDivisions: 5,
+                dateDivisions: 4,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Segment Animation Hybrid Chart Widget
+class _SegmentAnimationHybridChartWidget extends StatefulWidget {
+  final List<HybridChartData> priceData;
+
+  const _SegmentAnimationHybridChartWidget({required this.priceData});
+
+  @override
+  State<_SegmentAnimationHybridChartWidget> createState() => _SegmentAnimationHybridChartWidgetState();
+}
+
+class _SegmentAnimationHybridChartWidgetState extends State<_SegmentAnimationHybridChartWidget> {
+  late GlobalKey<State> _chartKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _chartKey = GlobalKey<State>();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Series with segment animations:
+    // Segment 0: Initial data points (Mon-Thu) - auto-animated
+    // Segment 1: First transition (Fri) - manual trigger
+    // Segment 2: Second transition (Mon) - manual trigger
+    // Segment 3: Final segment (Tue-Wed) - manual trigger
+    final series = HybridChartSeries(
+      name: 'Progressive Price Movement',
+      dataPoints: [
+        HybridChartData(label: 'Mon', open: 100, high: 115, low: 95, close: 105, volume: 10500, segmentAnimationOrder: 0),
+        HybridChartData(label: 'Tue', open: 105, high: 120, low: 100, close: 110, volume: 11000, segmentAnimationOrder: 0),
+        HybridChartData(label: 'Wed', open: 110, high: 125, low: 105, close: 115, volume: 11500, segmentAnimationOrder: 0),
+        HybridChartData(label: 'Thu', open: 115, high: 118, low: 108, close: 112, volume: 11200, segmentAnimationOrder: 0),
+        HybridChartData(label: 'Fri', open: 112, high: 122, low: 110, close: 120, volume: 12000, segmentAnimationOrder: 1),
+        HybridChartData(label: 'Mon', open: 120, high: 128, low: 115, close: 125, volume: 12500, segmentAnimationOrder: 2),
+        HybridChartData(label: 'Tue', open: 125, high: 130, low: 120, close: 128, volume: 12800, segmentAnimationOrder: 3),
+        HybridChartData(label: 'Wed', open: 128, high: 135, low: 122, close: 132, volume: 13200, segmentAnimationOrder: 3),
+      ],
+      color: Colors.blue,
+      lineWidth: 2.0,
+      showPoints: true,
+      pointSize: 6.0,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 0,
+        animationType: AreaAnimationType.drawLine,
+        animationTrigger: AreaAnimationTrigger.immediate,
+        duration: Duration(milliseconds: 1200),
+      ),
+    );
+
+    final style = HybridChartStyle(
+      colors: const [Colors.blue],
+      animationDuration: Duration(milliseconds: 1200),
+      animationCurve: Curves.easeInOut,
+      padding: const EdgeInsets.fromLTRB(10, 20, 60, 20),
+      showGrid: true,
+      autoHorizontalGridLines: 4,
+      autoVerticalGridLines: 4,
+      defaultAnimationType: AreaAnimationType.drawLine,
+      segmentAnimationConfigs: {
+        1: const SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.drawPoint,
+          duration: Duration(milliseconds: 600),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+        2: const SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.slideUp,
+          duration: Duration(milliseconds: 600),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+        3: const SegmentAnimationConfig(
+          segmentAnimationOrder: 3,
+          animationType: SegmentAnimationType.drawPoint,
+          duration: Duration(milliseconds: 800),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+      },
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Hybrid Chart - Segment Animations',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Initial segment animates automatically, then trigger additional segments progressively.',
+          style: TextStyle(fontSize: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 16),
+        // Control buttons
+        ElevatedButton.icon(
+          onPressed: () {
+            setState(() {
+              _chartKey = GlobalKey<State>();
+            });
+          },
+          icon: const Icon(Icons.restart_alt),
+          label: const Text('Reset'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red.shade100,
+            foregroundColor: Colors.red.shade900,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            height: 350,
+            child: MaterialHybridChart(
+              key: _chartKey,
+              series: [series],
+              width: 600,
+              height: 350,
+              style: style,
+              axisConfig: const HybridChartAxisConfig(
+                priceDivisions: 5,
+                dateDivisions: 4,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// All Manual Segment Animation Hybrid Chart Widget
+class _AllManualSegmentAnimationHybridChartWidget extends StatefulWidget {
+  final List<HybridChartData> priceData;
+
+  const _AllManualSegmentAnimationHybridChartWidget({required this.priceData});
+
+  @override
+  State<_AllManualSegmentAnimationHybridChartWidget> createState() => _AllManualSegmentAnimationHybridChartWidgetState();
+}
+
+class _AllManualSegmentAnimationHybridChartWidgetState extends State<_AllManualSegmentAnimationHybridChartWidget> {
+  late GlobalKey<State> _chartKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _chartKey = GlobalKey<State>();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Series with ALL segment animations using manual triggers:
+    // Segment 0: Manual trigger (Mon-Thu)
+    // Segment 1: Manual trigger (Fri)
+    // Segment 2: Manual trigger (Mon)
+    // Segment 3: Manual trigger (Tue-Wed)
+    final series = HybridChartSeries(
+      name: 'Manual Segment Animation',
+      dataPoints: [
+        HybridChartData(label: 'Mon', open: 100, high: 115, low: 95, close: 105, volume: 10500, segmentAnimationOrder: 0),
+        HybridChartData(label: 'Tue', open: 105, high: 120, low: 100, close: 110, volume: 11000, segmentAnimationOrder: 0),
+        HybridChartData(label: 'Wed', open: 110, high: 125, low: 105, close: 115, volume: 11500, segmentAnimationOrder: 0),
+        HybridChartData(label: 'Thu', open: 115, high: 118, low: 108, close: 112, volume: 11200, segmentAnimationOrder: 0),
+        HybridChartData(label: 'Fri', open: 112, high: 122, low: 110, close: 120, volume: 12000, segmentAnimationOrder: 1),
+        HybridChartData(label: 'Mon', open: 120, high: 128, low: 115, close: 125, volume: 12500, segmentAnimationOrder: 2),
+        HybridChartData(label: 'Tue', open: 125, high: 130, low: 120, close: 128, volume: 12800, segmentAnimationOrder: 3),
+        HybridChartData(label: 'Wed', open: 128, high: 135, low: 122, close: 132, volume: 13200, segmentAnimationOrder: 3),
+      ],
+      color: Colors.blue,
+      lineWidth: 2.0,
+      showPoints: true,
+      pointSize: 6.0,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 0,
+        animationType: AreaAnimationType.drawLine,
+        animationTrigger: AreaAnimationTrigger.manual,
+        duration: Duration(milliseconds: 1200),
+      ),
+    );
+
+    final style = HybridChartStyle(
+      colors: const [Colors.blue],
+      animationDuration: Duration(milliseconds: 1200),
+      animationCurve: Curves.easeInOut,
+      padding: const EdgeInsets.fromLTRB(10, 20, 60, 20),
+      showGrid: true,
+      autoHorizontalGridLines: 4,
+      autoVerticalGridLines: 4,
+      defaultAnimationType: AreaAnimationType.drawLine,
+      defaultAnimationTrigger: AreaAnimationTrigger.manual,
+      segmentAnimationConfigs: {
+        0: const SegmentAnimationConfig(
+          segmentAnimationOrder: 0,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: AreaAnimationTrigger.manual,
+          duration: Duration(milliseconds: 600),
+        ),
+        1: const SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: AreaAnimationTrigger.manual,
+          duration: Duration(milliseconds: 600),
+        ),
+        2: const SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.slideUp,
+          animationTrigger: AreaAnimationTrigger.manual,
+          duration: Duration(milliseconds: 600),
+        ),
+        3: const SegmentAnimationConfig(
+          segmentAnimationOrder: 3,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: AreaAnimationTrigger.manual,
+          duration: Duration(milliseconds: 800),
+        ),
+      },
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Hybrid Chart - All Manual Segment Animations',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'All segments wait for your button input - nothing animates automatically.',
+          style: TextStyle(fontSize: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 16),
+        // Control buttons
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            // Segment 0 controls
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).triggerAnimation(0);
+                }
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Play Segment 0'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).reverseAnimation(0);
+                }
+              },
+              icon: const Icon(Icons.fast_rewind),
+              label: const Text('Reverse Seg 0'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade300,
+                foregroundColor: Colors.white,
+              ),
+            ),
+
+            // Segment 1 controls
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).triggerAnimation(1);
+                }
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Play Segment 1'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).reverseAnimation(1);
+                }
+              },
+              icon: const Icon(Icons.fast_rewind),
+              label: const Text('Reverse Seg 1'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange.shade300,
+                foregroundColor: Colors.white,
+              ),
+            ),
+
+            // Segment 2 controls
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).triggerAnimation(2);
+                }
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Play Segment 2'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).reverseAnimation(2);
+                }
+              },
+              icon: const Icon(Icons.fast_rewind),
+              label: const Text('Reverse Seg 2'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple.shade300,
+                foregroundColor: Colors.white,
+              ),
+            ),
+
+            // Segment 3 controls
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).triggerAnimation(3);
+                }
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Play Segment 3'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                final state = _chartKey.currentState;
+                if (state != null) {
+                  (state as dynamic).reverseAnimation(3);
+                }
+              },
+              icon: const Icon(Icons.fast_rewind),
+              label: const Text('Reverse Seg 3'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal.shade300,
+                foregroundColor: Colors.white,
+              ),
+            ),
+
+            // Reset all
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _chartKey = GlobalKey<State>();
+                });
+              },
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Reset All'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            height: 350,
+            child: MaterialHybridChart(
+              key: _chartKey,
+              series: [series],
+              width: 600,
+              height: 350,
+              style: style,
+              axisConfig: const HybridChartAxisConfig(
+                priceDivisions: 5,
+                dateDivisions: 4,
+              ),
+            ),
+          ),
         ),
       ],
     );

@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../area_chart/models.dart' show AreaAnimationType;
 import '../shared/shared_models.dart';
 import 'models.dart';
 
@@ -10,6 +11,8 @@ import 'models.dart';
 class HybridChartPainter extends CustomPainter {
   final List<HybridChartSeries> series;
   final double progress;
+  final List<double> seriesAnimationProgress;
+  final Map<int, double> segmentAnimationProgress;
   final HybridChartStyle style;
   final HybridChartAxisConfig axisConfig;
   final Offset? hoverPosition;
@@ -22,6 +25,8 @@ class HybridChartPainter extends CustomPainter {
   HybridChartPainter({
     required this.series,
     required this.progress,
+    this.seriesAnimationProgress = const [],
+    this.segmentAnimationProgress = const {},
     required this.style,
     required this.axisConfig,
     required this.chartType,
@@ -257,52 +262,157 @@ class HybridChartPainter extends CustomPainter {
       final topFill = color.withValues(alpha: style.areaFillOpacityTop.clamp(0.0, 1.0));
       final bottomFill = color.withValues(alpha: style.areaFillOpacityBottom.clamp(0.0, 1.0));
 
-      // Calculate points
-      final points = _getAreaChartPoints(chartArea, seriesData);
-      if (points.isEmpty) continue;
+      final seriesProgress = seriesAnimationProgress.isNotEmpty && seriesIdx < seriesAnimationProgress.length ? seriesAnimationProgress[seriesIdx] : progress;
 
-      // Animate area/line drawing based on progress: build an interpolated subset of points
-      List<Offset> animatedPoints = points;
-      if (progress > 0.0 && progress < 1.0 && points.length >= 2) {
-        final maxIndex = points.length - 1;
-        final pos = progress * maxIndex;
-        final idx = pos.floor();
-        final frac = pos - idx;
-        animatedPoints = points.sublist(0, idx + 1);
-        if (idx + 1 <= maxIndex) {
-          final a = points[idx];
-          final b = points[idx + 1];
-          final interp = Offset(ui.lerpDouble(a.dx, b.dx, frac)!, ui.lerpDouble(a.dy, b.dy, frac)!);
-          animatedPoints.add(interp);
+      final segmentGroups = <int, List<int>>{};
+      for (int pointIdx = 0; pointIdx < seriesData.dataPoints.length; pointIdx++) {
+        final point = seriesData.dataPoints[pointIdx];
+        final segmentOrder = point.segmentAnimationOrder;
+        if (!segmentGroups.containsKey(segmentOrder)) {
+          segmentGroups[segmentOrder] = [];
         }
+        segmentGroups[segmentOrder]!.add(pointIdx);
       }
 
-      // Draw area fill only if not skipped (i.e., for area chart, not for multi-line)
-      if (!skipFill) {
-        _drawAreaFill(canvas, chartArea, animatedPoints, topFill, bottomFill);
-      }
+      final sortedOrders = segmentGroups.keys.toList()..sort();
 
-      // Draw line
-      _drawAreaLine(canvas, animatedPoints, color);
+      for (final segmentOrder in sortedOrders) {
+        final indices = segmentGroups[segmentOrder]!;
+        if (indices.isEmpty) continue;
 
-      // Draw points (only for those included in animatedPoints)
-      if (style.showPoints) {
-        final pointSize = seriesData.pointSize ?? style.defaultPointSize;
-        int? hoverIndex;
-        if (enableHoverPointScale && hoverPosition != null) {
-          final hitRadius = max(8.0, pointSize / 2 + 6.0);
-          hoverIndex = _getHoveredPointIndex(animatedPoints, hoverPosition!, hitRadius);
+        final hasSegmentConfig = style.segmentAnimationConfigs.containsKey(segmentOrder);
+
+        if (hasSegmentConfig) {
+          final segmentProgress = segmentAnimationProgress[segmentOrder] ?? 0.0;
+          if (segmentProgress > 0.001) {
+            _drawSegmentGroup(
+              canvas,
+              chartArea,
+              seriesData,
+              indices,
+              color,
+              topFill,
+              bottomFill,
+              segmentProgress,
+              segmentOrder,
+              skipFill: skipFill,
+            );
+          }
+        } else {
+          if (seriesProgress > 0.0) {
+            _drawSegmentGroup(
+              canvas,
+              chartArea,
+              seriesData,
+              indices,
+              color,
+              topFill,
+              bottomFill,
+              seriesProgress,
+              segmentOrder,
+              useSeriesAnimation: true,
+              skipFill: skipFill,
+            );
+          }
         }
-        _drawAreaPoints(
-          canvas,
-          animatedPoints,
-          color,
-          pointSize: pointSize,
-          hoverIndex: hoverIndex,
-          hoverScale: enableHoverPointScale ? hoverPointScale : 1.0,
-        );
       }
     }
+  }
+
+  void _drawSegmentGroup(
+    Canvas canvas,
+    Rect chartArea,
+    HybridChartSeries seriesData,
+    List<int> indices,
+    Color color,
+    Color topFill,
+    Color bottomFill,
+    double progress,
+    int segmentOrder, {
+    bool useSeriesAnimation = false,
+    bool skipFill = false,
+  }) {
+    final points = _getAreaChartPoints(chartArea, seriesData);
+    if (points.isEmpty || indices.isEmpty) return;
+
+    int startIdx = indices.first.clamp(0, points.length - 1);
+    int endIdx = indices.last.clamp(0, points.length - 1);
+
+    if (!useSeriesAnimation && startIdx > 0) {
+      startIdx = (startIdx - 1).clamp(0, points.length - 1);
+    }
+
+    if (startIdx >= points.length || endIdx >= points.length || startIdx > endIdx) return;
+
+    final segmentPoints = points.sublist(startIdx, endIdx + 1);
+    if (segmentPoints.length < 2) return;
+
+    double opacity = 1.0;
+    double offsetY = 0.0;
+    bool shouldDrawProgressively = true;
+
+    if (useSeriesAnimation) {
+      final animConfig = seriesData.animationConfig;
+      final animType = animConfig?.animationType ?? style.defaultAnimationType;
+      if (animType == AreaAnimationType.fadeIn) {
+        opacity = progress;
+        shouldDrawProgressively = false;
+      } else if (animType == AreaAnimationType.slideUp) {
+        opacity = progress;
+        offsetY = (1.0 - progress) * 20.0;
+        shouldDrawProgressively = false;
+      }
+    } else {
+      final segmentConfig = style.segmentAnimationConfigs[segmentOrder];
+      if (segmentConfig != null) {
+        final animType = segmentConfig.animationType;
+        if (animType == SegmentAnimationType.fadeIn) {
+          opacity = progress;
+          shouldDrawProgressively = false;
+        } else if (animType == SegmentAnimationType.slideUp) {
+          opacity = progress;
+          offsetY = (1.0 - progress) * 20.0;
+          shouldDrawProgressively = false;
+        }
+      }
+    }
+
+    if (shouldDrawProgressively && progress <= 0.0) return;
+    if (!shouldDrawProgressively && opacity <= 0.0) return;
+
+    canvas.save();
+    if (offsetY != 0.0) {
+      canvas.translate(0, offsetY);
+    }
+
+    if (!skipFill) {
+      _drawAreaFill(canvas, chartArea, segmentPoints, topFill, bottomFill, progress, opacity, shouldDrawProgressively);
+    }
+
+    _drawAreaLine(canvas, segmentPoints, seriesData, color, progress, opacity, shouldDrawProgressively);
+
+    if (seriesData.showPoints ?? style.showPoints) {
+      final pointSize = seriesData.pointSize ?? style.defaultPointSize;
+      int? hoverIndex;
+      if (enableHoverPointScale && hoverPosition != null) {
+        final hitRadius = max(8.0, pointSize / 2 + 6.0);
+        hoverIndex = _getHoveredPointIndex(segmentPoints, hoverPosition!, hitRadius);
+      }
+      _drawAreaPoints(
+        canvas,
+        segmentPoints,
+        color,
+        progress: progress,
+        opacity: opacity,
+        shouldDrawProgressively: shouldDrawProgressively,
+        hasConnectingPoint: !useSeriesAnimation && startIdx > 0,
+        pointSize: pointSize,
+        hoverIndex: hoverIndex,
+        hoverScale: enableHoverPointScale ? hoverPointScale : 1.0,
+      );
+    }
+
+    canvas.restore();
   }
 
   void _drawCandlestickChart(Canvas canvas, Rect chartArea) {
@@ -340,8 +450,7 @@ class HybridChartPainter extends CustomPainter {
       final wickPaint = Paint()
         ..color = color
         ..strokeWidth = style.wickWidth;
-      canvas.drawLine(Offset(candleX + effectiveWidth / 2, highY),
-          Offset(candleX + effectiveWidth / 2, lowY), wickPaint);
+      canvas.drawLine(Offset(candleX + effectiveWidth / 2, highY), Offset(candleX + effectiveWidth / 2, lowY), wickPaint);
 
       // Draw body
       final bodyRect = Rect.fromLTRB(
@@ -357,7 +466,18 @@ class HybridChartPainter extends CustomPainter {
     }
   }
 
-  void _drawAreaFill(Canvas canvas, Rect chartArea, List<Offset> points, Color topColor, Color bottomColor) {
+  void _drawAreaFill(
+    Canvas canvas,
+    Rect chartArea,
+    List<Offset> points,
+    Color topColor,
+    Color bottomColor,
+    double progress,
+    double opacity,
+    bool shouldDrawProgressively,
+  ) {
+    if (points.isEmpty) return;
+
     final path = Path();
     path.moveTo(points.first.dx, chartArea.bottom);
     path.lineTo(points.first.dx, points.first.dy);
@@ -371,20 +491,50 @@ class HybridChartPainter extends CustomPainter {
 
     final paint = Paint()
       ..shader = ui.Gradient.linear(
-        Offset(0, points.isEmpty ? 0 : points[0].dy),
+        Offset(0, points[0].dy),
         Offset(0, chartArea.bottom),
-        [topColor, bottomColor],
+        [
+          topColor.withValues(alpha: opacity * topColor.a),
+          bottomColor.withValues(alpha: opacity * bottomColor.a),
+        ],
       );
 
-    canvas.drawPath(path, paint);
+    if (shouldDrawProgressively) {
+      if (progress <= 0.0) return;
+      if (progress >= 1.0) {
+        canvas.drawPath(path, paint);
+        return;
+      }
+
+      final startX = points.first.dx;
+      final endX = points.last.dx;
+      final revealX = startX + (endX - startX) * progress;
+
+      canvas.save();
+      canvas.clipRect(Rect.fromLTRB(startX, chartArea.top, revealX, chartArea.bottom));
+      canvas.drawPath(path, paint);
+      canvas.restore();
+    } else {
+      canvas.drawPath(path, paint);
+    }
   }
 
-  void _drawAreaLine(Canvas canvas, List<Offset> points, Color color) {
-    if (points.length < 2) return;
+  void _drawAreaLine(
+    Canvas canvas,
+    List<Offset> points,
+    HybridChartSeries seriesData,
+    Color color,
+    double progress,
+    double opacity,
+    bool shouldDrawProgressively,
+  ) {
+    if (points.isEmpty) return;
 
     final paint = Paint()
-      ..color = color
-      ..strokeWidth = style.defaultLineWidth
+      ..color = color.withValues(alpha: opacity)
+      ..strokeWidth = seriesData.lineWidth ?? style.defaultLineWidth
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
 
     final path = Path();
@@ -393,25 +543,47 @@ class HybridChartPainter extends CustomPainter {
       path.lineTo(points[i].dx, points[i].dy);
     }
 
-    canvas.drawPath(path, paint);
+    if (shouldDrawProgressively) {
+      final pathMetrics = path.computeMetrics().toList();
+      if (pathMetrics.isEmpty) return;
+      final metric = pathMetrics.first;
+      final animatedPath = metric.extractPath(0.0, metric.length * progress);
+      canvas.drawPath(animatedPath, paint);
+    } else {
+      canvas.drawPath(path, paint);
+    }
   }
 
   void _drawAreaPoints(
     Canvas canvas,
     List<Offset> points,
     Color color, {
+    required double progress,
+    required double opacity,
+    required bool shouldDrawProgressively,
+    required bool hasConnectingPoint,
     required double pointSize,
     int? hoverIndex,
     double hoverScale = 1.0,
   }) {
     final paint = Paint()
-      ..color = color
+      ..color = color.withValues(alpha: opacity)
       ..style = PaintingStyle.fill;
 
     final safeScale = hoverScale <= 0 ? 1.0 : hoverScale;
     final baseRadius = pointSize / 2;
 
-    for (int i = 0; i < points.length; i++) {
+    int pointsToDraw;
+    if (shouldDrawProgressively) {
+      pointsToDraw = (points.length * progress).floor();
+      pointsToDraw = pointsToDraw.clamp(0, points.length);
+    } else {
+      pointsToDraw = points.length;
+    }
+
+    final startIndex = hasConnectingPoint ? 1 : 0;
+
+    for (int i = startIndex; i < pointsToDraw; i++) {
       final point = points[i];
       final isHovered = hoverIndex != null && hoverIndex == i;
       final radius = isHovered ? baseRadius * safeScale : baseRadius;
@@ -447,7 +619,7 @@ class HybridChartPainter extends CustomPainter {
     // Use xSpanSlots if defined to spread points across total slots
     final slots = style.xSpanSlots ?? dataPoints.length;
     final count = dataPoints.length < slots ? dataPoints.length : slots;
-    
+
     return List.generate(count, (i) {
       final x = _getXCoordinate(chartArea, i, dataPoints.length);
       final normalizedValue = (dataPoints[i].value - minValue) / valueRange;
@@ -634,51 +806,32 @@ class HybridChartPainter extends CustomPainter {
     double yVal = 0.0;
     if (!style.singleCrosshair || style.singleCrosshairOrientation == SingleCrosshairOrientation.horizontal) {
       if ((chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) && series.isNotEmpty) {
-      // For area chart, calculate Y value from the chart area
-      final minY = style.forceYAxisFromZero
-        ? 0.0
-        : series
-          .expand((s) => s.dataPoints.map((d) => d.value))
-          .reduce((a, b) => a < b ? a : b);
-      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
-        final maxY = series
-          .expand((s) => s.dataPoints.map((d) => d.value))
-          .reduce((a, b) => a > b ? a : b) + maxOffset;
-      final normalizedY = ((chartArea.bottom - hoverPosition!.dy) / chartArea.height).clamp(0.0, 1.0);
-      yVal = minY + (normalizedY * (maxY - minY));
-    } else if (chartType == HybridChartType.candlestick && series.isNotEmpty) {
-      // For candlestick chart, use close price or estimate from height
-      final minY = style.forceYAxisFromZero
-        ? 0.0
-        : series
-          .expand((s) => s.dataPoints.map((d) => d.low ?? d.close))
-          .reduce((a, b) => a < b ? a : b);
-      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
-        final maxY = series
-          .expand((s) => s.dataPoints.map((d) => d.high ?? d.close))
-          .reduce((a, b) => a > b ? a : b) + maxOffset;
-      final normalizedY = ((chartArea.bottom - hoverPosition!.dy) / chartArea.height).clamp(0.0, 1.0);
-      yVal = minY + (normalizedY * (maxY - minY));
-    }
+        // For area chart, calculate Y value from the chart area
+        final minY = style.forceYAxisFromZero ? 0.0 : series.expand((s) => s.dataPoints.map((d) => d.value)).reduce((a, b) => a < b ? a : b);
+        final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+        final maxY = series.expand((s) => s.dataPoints.map((d) => d.value)).reduce((a, b) => a > b ? a : b) + maxOffset;
+        final normalizedY = ((chartArea.bottom - hoverPosition!.dy) / chartArea.height).clamp(0.0, 1.0);
+        yVal = minY + (normalizedY * (maxY - minY));
+      } else if (chartType == HybridChartType.candlestick && series.isNotEmpty) {
+        // For candlestick chart, use close price or estimate from height
+        final minY = style.forceYAxisFromZero ? 0.0 : series.expand((s) => s.dataPoints.map((d) => d.low ?? d.close)).reduce((a, b) => a < b ? a : b);
+        final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+        final maxY = series.expand((s) => s.dataPoints.map((d) => d.high ?? d.close)).reduce((a, b) => a > b ? a : b) + maxOffset;
+        final normalizedY = ((chartArea.bottom - hoverPosition!.dy) / chartArea.height).clamp(0.0, 1.0);
+        yVal = minY + (normalizedY * (maxY - minY));
+      }
       final yText = _formatNumber(yVal);
       final ySpan = TextSpan(text: yText, style: textStyle);
       final yPainter = TextPainter(text: ySpan, textDirection: TextDirection.ltr)..layout();
 
-        // Position: for horizontal single crosshair place label on the same
-        // side as the configured Y axis (left/right). Otherwise place next
-        // to the configured Y axis side as before.
-        final yLabelX = (style.singleCrosshair == true && style.singleCrosshairOrientation == SingleCrosshairOrientation.horizontal)
-          ? (axisConfig.yAxisPosition == YAxisPosition.left
-            ? chartArea.left - yPainter.width - style.yAxisLabelGap - 4
-            : chartArea.right + style.yAxisLabelGap)
-          : (axisConfig.yAxisPosition == YAxisPosition.right
-            ? chartArea.right + style.yAxisLabelGap
-            : chartArea.left - yPainter.width - style.yAxisLabelGap - 4);
+      // Position: for horizontal single crosshair place label on the same
+      // side as the configured Y axis (left/right). Otherwise place next
+      // to the configured Y axis side as before.
+      final yLabelX = (style.singleCrosshair == true && style.singleCrosshairOrientation == SingleCrosshairOrientation.horizontal) ? (axisConfig.yAxisPosition == YAxisPosition.left ? chartArea.left - yPainter.width - style.yAxisLabelGap - 4 : chartArea.right + style.yAxisLabelGap) : (axisConfig.yAxisPosition == YAxisPosition.right ? chartArea.right + style.yAxisLabelGap : chartArea.left - yPainter.width - style.yAxisLabelGap - 4);
 
       final yRect = Rect.fromLTWH(
         yLabelX,
-        (hoverPosition!.dy - yPainter.height / 2)
-            .clamp(chartArea.top, chartArea.bottom - yPainter.height),
+        (hoverPosition!.dy - yPainter.height / 2).clamp(chartArea.top, chartArea.bottom - yPainter.height),
         yPainter.width + 4,
         yPainter.height + 2,
       );
@@ -690,8 +843,7 @@ class HybridChartPainter extends CustomPainter {
     // X-axis label from nearest index
     // Draw bottom X label when not using singleCrosshair (full crosshair),
     // or when singleCrosshair orientation is vertical (keep legacy bottom label for vertical single crosshair).
-    if ((!style.singleCrosshair || style.singleCrosshairOrientation == SingleCrosshairOrientation.vertical)
-      && series.isNotEmpty && series.first.dataPoints.isNotEmpty) {
+    if ((!style.singleCrosshair || style.singleCrosshairOrientation == SingleCrosshairOrientation.vertical) && series.isNotEmpty && series.first.dataPoints.isNotEmpty) {
       final rawCount = series.first.dataPoints.length;
       final slots = style.xSpanSlots ?? rawCount;
       final count = min(rawCount, slots);
@@ -707,12 +859,9 @@ class HybridChartPainter extends CustomPainter {
         final xSpan = TextSpan(text: label, style: textStyle);
         final xPainter = TextPainter(text: xSpan, textDirection: TextDirection.ltr)..layout();
 
-        final xY = axisConfig.xAxisPosition == XAxisPosition.top
-          ? (chartArea.top - xPainter.height - style.xAxisLabelGap)
-          : (chartArea.bottom + style.xAxisLabelGap);
+        final xY = axisConfig.xAxisPosition == XAxisPosition.top ? (chartArea.top - xPainter.height - style.xAxisLabelGap) : (chartArea.bottom + style.xAxisLabelGap);
         final xRect = Rect.fromLTWH(
-          (hoverPosition!.dx - xPainter.width / 2)
-              .clamp(chartArea.left, chartArea.right - xPainter.width),
+          (hoverPosition!.dx - xPainter.width / 2).clamp(chartArea.left, chartArea.right - xPainter.width),
           xY,
           xPainter.width + 4,
           xPainter.height + 2,
@@ -732,8 +881,6 @@ class HybridChartPainter extends CustomPainter {
 
     // Choose X position for Y-axis based on configured position (left/right)
     final double yAxisX = axisConfig.yAxisPosition == YAxisPosition.right ? chartArea.right : chartArea.left;
-    // Determine where the X-axis is drawn so we don't overlap axes
-    final double xAxisY = axisConfig.xAxisPosition == XAxisPosition.top ? chartArea.top : chartArea.bottom;
     final double yAxisStart = chartArea.top + (axisConfig.xAxisPosition == XAxisPosition.top ? style.xAxisStrokeWidth / 2 : 0.0);
     final double yAxisEnd = chartArea.bottom - (axisConfig.xAxisPosition == XAxisPosition.bottom ? style.xAxisStrokeWidth / 2 : 0.0);
     canvas.drawLine(
@@ -924,9 +1071,7 @@ class HybridChartPainter extends CustomPainter {
       )..layout();
 
       // Position based on yAxisPosition setting
-      final xPosition = axisConfig.yAxisPosition == YAxisPosition.right
-        ? chartArea.right + style.yAxisLabelGap
-        : chartArea.left - textPainter.width - style.yAxisLabelGap;
+      final xPosition = axisConfig.yAxisPosition == YAxisPosition.right ? chartArea.right + style.yAxisLabelGap : chartArea.left - textPainter.width - style.yAxisLabelGap;
 
       textPainter.paint(
         canvas,
@@ -941,14 +1086,14 @@ class HybridChartPainter extends CustomPainter {
     if (series.isEmpty || series[0].dataPoints.isEmpty) return;
 
     final dataPoints = series[0].dataPoints;
-    
+
     // Determine max data points to show based on chart type and xSpanSlots
     int maxDataPoints = dataPoints.length;
     if (chartType == HybridChartType.candlestick) {
       final slots = style.xSpanSlots ?? dataPoints.length;
       maxDataPoints = min(dataPoints.length, slots);
     }
-    
+
     final labelCount = min(axisConfig.dateDivisions, maxDataPoints);
     final step = max(1, (maxDataPoints / labelCount).ceil());
 
@@ -990,9 +1135,7 @@ class HybridChartPainter extends CustomPainter {
         textDirection: ui.TextDirection.ltr,
       )..layout();
 
-      final labelY = axisConfig.xAxisPosition == XAxisPosition.top
-        ? (chartArea.top - textPainter.height - style.xAxisLabelGap)
-        : (chartArea.bottom + style.xAxisLabelGap);
+      final labelY = axisConfig.xAxisPosition == XAxisPosition.top ? (chartArea.top - textPainter.height - style.xAxisLabelGap) : (chartArea.bottom + style.xAxisLabelGap);
       textPainter.paint(
         canvas,
         Offset(x - textPainter.width / 2, labelY),
@@ -1009,9 +1152,7 @@ class HybridChartPainter extends CustomPainter {
       final span = TextSpan(text: style.xAxisTitle, style: titleStyle);
       final tp = TextPainter(text: span, textDirection: ui.TextDirection.ltr)..layout();
       final x = chartArea.left + chartArea.width / 2 - tp.width / 2;
-      final y = axisConfig.xAxisPosition == XAxisPosition.top
-          ? (chartArea.top - style.xAxisTitleGap - tp.height)
-          : (chartArea.bottom + style.xAxisTitleGap);
+      final y = axisConfig.xAxisPosition == XAxisPosition.top ? (chartArea.top - style.xAxisTitleGap - tp.height) : (chartArea.bottom + style.xAxisTitleGap);
       tp.paint(canvas, Offset(x, y));
     }
 
@@ -1043,11 +1184,6 @@ class HybridChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(HybridChartPainter oldDelegate) {
-    return oldDelegate.progress != progress ||
-        oldDelegate.series != series ||
-        oldDelegate.style != style ||
-        oldDelegate.chartType != chartType ||
-        oldDelegate.hoverPosition != hoverPosition ||
-        oldDelegate.scrollOffset != scrollOffset;
+    return oldDelegate.progress != progress || oldDelegate.seriesAnimationProgress != seriesAnimationProgress || oldDelegate.segmentAnimationProgress != segmentAnimationProgress || oldDelegate.series != series || oldDelegate.style != style || oldDelegate.chartType != chartType || oldDelegate.hoverPosition != hoverPosition || oldDelegate.scrollOffset != scrollOffset;
   }
 }

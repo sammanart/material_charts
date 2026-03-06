@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'models.dart';
@@ -12,6 +13,7 @@ import 'models.dart';
 class BarChartPainter extends CustomPainter {
   final List<BarChartData> data; // Data points to be displayed in the chart
   final double progress; // Animation progress from 0.0 to 1.0
+  final List<double> barAnimationProgress; // Per-bar animation progress values
   final BarChartStyle style; // Styling options for the chart
   final bool showGrid; // Flag to show or hide grid lines
   final bool showValues; // Flag to show or hide bar values
@@ -28,6 +30,7 @@ class BarChartPainter extends CustomPainter {
   BarChartPainter({
     required this.data,
     required this.progress,
+    required this.barAnimationProgress,
     required this.style,
     required this.showGrid,
     required this.showValues,
@@ -245,8 +248,22 @@ class BarChartPainter extends CustomPainter {
         final valueY =
             _valueToVerticalY(data[dataIndex].value, chartArea, range, isInverted);
         final fullHeight = (valueY - zeroY).abs();
-        final barHeight = fullHeight * progress;
-        final barTop = valueY < zeroY ? zeroY - barHeight : zeroY;
+
+        // Get animation type for this bar
+        final animationType = data[dataIndex].animationConfig?.animationType ??
+            style.defaultAnimationType;
+
+        // Apply animation effect to get height scale, offset, and alpha
+        final (heightScale, yOffset, alphaScale) = _applyAnimationEffect(
+          dataIndex,
+          fullHeight,
+          zeroY,
+          isInverted,
+          animationType,
+        );
+
+        final barHeight = fullHeight * heightScale;
+        final barTop = (valueY < zeroY ? zeroY - barHeight : zeroY) + yOffset;
 
         final rect = RRect.fromRectAndRadius(
           Rect.fromLTWH(barX, barTop, barWidth, barHeight),
@@ -264,7 +281,11 @@ class BarChartPainter extends CustomPainter {
           isInverted ? Alignment.bottomCenter : Alignment.topCenter,
         );
 
-        if (_isRectHovered(rect.outerRect)) {
+        // Apply alpha scale from fadeIn or other animations
+        paint.color = paint.color.withOpacity(paint.color.opacity * alphaScale);
+
+        // Only show hover effect if the bar is actually visible
+        if (alphaScale > 0 && _isRectHovered(rect.outerRect)) {
           _applyHoverEffect(
             canvas,
             rect,
@@ -284,6 +305,7 @@ class BarChartPainter extends CustomPainter {
         // Draw value labels
         if (showValues) {
           final isUpward = valueY < zeroY;
+          final animProgress = dataIndex < barAnimationProgress.length ? barAnimationProgress[dataIndex] : 1.0;
           _drawValueLabel(
             canvas,
             data[dataIndex].value,
@@ -293,6 +315,7 @@ class BarChartPainter extends CustomPainter {
             ),
             data[dataIndex].color ?? style.barColor,
             isAbove: isUpward,
+            opacity: animProgress,
           );
         }
       }
@@ -337,8 +360,22 @@ class BarChartPainter extends CustomPainter {
         final valueX =
             _valueToHorizontalX(data[dataIndex].value, chartArea, range, isReversed);
         final fullWidth = (valueX - zeroX).abs();
-        final barWidth = fullWidth * progress;
-        final barLeft = valueX < zeroX ? zeroX - barWidth : zeroX;
+
+        // Get animation type for this bar
+        final animationType = data[dataIndex].animationConfig?.animationType ??
+            style.defaultAnimationType;
+
+        // Apply animation effect to get width scale, offset, and alpha
+        final (widthScale, xOffset, alphaScale) = _applyAnimationEffect(
+          dataIndex,
+          fullWidth,
+          zeroX,
+          isReversed,
+          animationType,
+        );
+
+        final barWidth = fullWidth * widthScale;
+        final barLeft = (valueX < zeroX ? zeroX - barWidth : zeroX) + xOffset;
 
         final rect = RRect.fromRectAndRadius(
           Rect.fromLTWH(barLeft, barY, barWidth, barHeight),
@@ -356,7 +393,11 @@ class BarChartPainter extends CustomPainter {
           isReversed ? Alignment.centerLeft : Alignment.centerRight,
         );
 
-        if (_isRectHovered(rect.outerRect)) {
+        // Apply alpha scale from fadeIn or other animations
+        paint.color = paint.color.withOpacity(paint.color.opacity * alphaScale);
+
+        // Only show hover effect if the bar is actually visible
+        if (alphaScale > 0 && _isRectHovered(rect.outerRect)) {
           _applyHoverEffect(
             canvas,
             rect,
@@ -376,6 +417,7 @@ class BarChartPainter extends CustomPainter {
         // Draw value labels
         if (showValues) {
           final isToRight = valueX > zeroX;
+          final animProgress = dataIndex < barAnimationProgress.length ? barAnimationProgress[dataIndex] : 1.0;
           _drawValueLabel(
             canvas,
             data[dataIndex].value,
@@ -386,6 +428,7 @@ class BarChartPainter extends CustomPainter {
             data[dataIndex].color ?? style.barColor,
             isAbove: false,
             isLeftAligned: !isToRight,
+            opacity: animProgress,
           );
         }
       }
@@ -404,8 +447,22 @@ class BarChartPainter extends CustomPainter {
       final barX = chartArea.left + (i * (barWidth + spacing)) + (spacing / 2);
       final valueY = _valueToVerticalY(data[i].value, chartArea, range, isInverted);
       final fullHeight = (valueY - zeroY).abs();
-      final barHeight = fullHeight * progress;
-      final barTop = valueY < zeroY ? zeroY - barHeight : zeroY;
+
+      // Get animation type for this bar
+      final animationType = data[i].animationConfig?.animationType ??
+          style.defaultAnimationType;
+
+      // Apply animation effect to get height scale, offset, and alpha
+      final (heightScale, yOffset, alphaScale) = _applyAnimationEffect(
+        i,
+        fullHeight,
+        zeroY,
+        isInverted,
+        animationType,
+      );
+
+      final barHeight = fullHeight * heightScale;
+      final barTop = (valueY < zeroY ? zeroY - barHeight : zeroY) + yOffset;
 
       final rect = RRect.fromRectAndRadius(
         Rect.fromLTWH(barX, barTop, barWidth, barHeight),
@@ -423,7 +480,11 @@ class BarChartPainter extends CustomPainter {
         isInverted ? Alignment.bottomCenter : Alignment.topCenter,
       );
 
-      if (_isRectHovered(rect.outerRect)) {
+      // Apply alpha scale from fadeIn or other animations
+      paint.color = paint.color.withOpacity(paint.color.opacity * alphaScale);
+
+      // Only show hover effect if the bar is actually visible
+      if (alphaScale > 0 && _isRectHovered(rect.outerRect)) {
         _applyHoverEffect(
           canvas,
           rect,
@@ -443,6 +504,7 @@ class BarChartPainter extends CustomPainter {
       // Draw value labels (always horizontal)
       if (showValues) {
         final isUpward = valueY < zeroY;
+        final animProgress = i < barAnimationProgress.length ? barAnimationProgress[i] : 1.0;
         _drawValueLabel(
           canvas,
           data[i].value,
@@ -452,6 +514,7 @@ class BarChartPainter extends CustomPainter {
           ),
           data[i].color ?? style.barColor,
           isAbove: isUpward,
+          opacity: animProgress,
         );
       }
     }
@@ -471,8 +534,22 @@ class BarChartPainter extends CustomPainter {
       final barY = chartArea.top + (i * (barHeight + spacing)) + (spacing / 2);
       final valueX = _valueToHorizontalX(data[i].value, chartArea, range, isReversed);
       final fullWidth = (valueX - zeroX).abs();
-      final barWidth = fullWidth * progress;
-      final barLeft = valueX < zeroX ? zeroX - barWidth : zeroX;
+
+      // Get animation type for this bar
+      final animationType = data[i].animationConfig?.animationType ??
+          style.defaultAnimationType;
+
+      // Apply animation effect to get width scale, offset, and alpha
+      final (widthScale, xOffset, alphaScale) = _applyAnimationEffect(
+        i,
+        fullWidth,
+        zeroX,
+        isReversed,
+        animationType,
+      );
+
+      final barWidth = fullWidth * widthScale;
+      final barLeft = (valueX < zeroX ? zeroX - barWidth : zeroX) + xOffset;
 
       final rect = RRect.fromRectAndRadius(
         Rect.fromLTWH(barLeft, barY, barWidth, barHeight),
@@ -490,7 +567,11 @@ class BarChartPainter extends CustomPainter {
         isReversed ? Alignment.centerLeft : Alignment.centerRight,
       );
 
-      if (_isRectHovered(rect.outerRect)) {
+      // Apply alpha scale from fadeIn or other animations
+      paint.color = paint.color.withOpacity(paint.color.opacity * alphaScale);
+
+      // Only show hover effect if the bar is actually visible
+      if (alphaScale > 0 && _isRectHovered(rect.outerRect)) {
         _applyHoverEffect(
           canvas,
           rect,
@@ -510,6 +591,7 @@ class BarChartPainter extends CustomPainter {
       // Draw value labels (always horizontal)
       if (showValues) {
         final isToRight = valueX > zeroX;
+        final animProgress = i < barAnimationProgress.length ? barAnimationProgress[i] : 1.0;
         _drawValueLabel(
           canvas,
           data[i].value,
@@ -520,6 +602,7 @@ class BarChartPainter extends CustomPainter {
           data[i].color ?? style.barColor,
           isAbove: false,
           isLeftAligned: !isToRight,
+          opacity: animProgress,
         );
       }
     }
@@ -582,10 +665,12 @@ class BarChartPainter extends CustomPainter {
     Color color, {
     bool isAbove = true,
     bool isLeftAligned = false,
+    double opacity = 1.0,
   }) {
     final valueText = value.toStringAsFixed(1);
-    final textStyle = style.valueStyle ??
-        TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold);
+    final textStyle = (style.valueStyle ??
+            TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold))
+        .copyWith(color: color.withOpacity(color.opacity * opacity));
     final textSpan = TextSpan(text: valueText, style: textStyle);
     final textPainter = TextPainter(
       text: textSpan,
@@ -646,7 +731,19 @@ class BarChartPainter extends CustomPainter {
     for (int g = 0; g < groups.length; g++) {
       final group = groups[g];
       final groupX = chartArea.left + (g * (groupWidth + groupSpacing)) + (groupSpacing / 2);
-      final textSpan = TextSpan(text: group.key, style: textStyle);
+      
+      // Get the max animation progress for bars in this group
+      double maxProgress = 0.0;
+      for (final barIndex in group.value) {
+        if (barIndex < barAnimationProgress.length) {
+          maxProgress = max(maxProgress, barAnimationProgress[barIndex]);
+        }
+      }
+      
+      final styledText = textStyle.copyWith(
+        color: textStyle.color?.withOpacity((textStyle.color?.opacity ?? 1.0) * maxProgress)
+      );
+      final textSpan = TextSpan(text: group.key, style: styledText);
       final textPainter = TextPainter(
         text: textSpan,
         textDirection: TextDirection.ltr,
@@ -677,7 +774,19 @@ class BarChartPainter extends CustomPainter {
     for (int g = 0; g < groups.length; g++) {
       final group = groups[g];
       final groupY = chartArea.top + (g * (groupHeight + groupSpacing)) + (groupSpacing / 2);
-      final textSpan = TextSpan(text: group.key, style: textStyle);
+      
+      // Get the max animation progress for bars in this group
+      double maxProgress = 0.0;
+      for (final barIndex in group.value) {
+        if (barIndex < barAnimationProgress.length) {
+          maxProgress = max(maxProgress, barAnimationProgress[barIndex]);
+        }
+      }
+      
+      final styledText = textStyle.copyWith(
+        color: textStyle.color?.withOpacity((textStyle.color?.opacity ?? 1.0) * maxProgress)
+      );
+      final textSpan = TextSpan(text: group.key, style: styledText);
       final textPainter = TextPainter(
         text: textSpan,
         textDirection: TextDirection.ltr,
@@ -703,13 +812,19 @@ class BarChartPainter extends CustomPainter {
     final isInverted = _isInverted();
 
     for (int i = 0; i < data.length; i++) {
-      final x = chartArea.left + (i * (barWidth + spacing)) + (spacing / 2);
-      final textSpan = TextSpan(text: data[i].label, style: textStyle);
+      // Get animation progress for this bar
+      final progress = i < barAnimationProgress.length ? barAnimationProgress[i] : 1.0;
+      
+      final styledText = textStyle.copyWith(
+        color: textStyle.color?.withOpacity((textStyle.color?.opacity ?? 1.0) * progress)
+      );
+      final textSpan = TextSpan(text: data[i].label, style: styledText);
       final textPainter = TextPainter(
         text: textSpan,
         textDirection: TextDirection.ltr,
       )..layout();
 
+      final x = chartArea.left + (i * (barWidth + spacing)) + (spacing / 2);
       final yPosition = isInverted
           ? chartArea.top - textPainter.height - 8
           : chartArea.bottom + padding.bottom / 2 - textPainter.height / 2;
@@ -734,13 +849,19 @@ class BarChartPainter extends CustomPainter {
     final isReversed = style.rotation >= 225 && style.rotation < 315;
 
     for (int i = 0; i < data.length; i++) {
-      final y = chartArea.top + (i * (barHeight + spacing)) + (spacing / 2);
-      final textSpan = TextSpan(text: data[i].label, style: textStyle);
+      // Get animation progress for this bar
+      final progress = i < barAnimationProgress.length ? barAnimationProgress[i] : 1.0;
+      
+      final styledText = textStyle.copyWith(
+        color: textStyle.color?.withOpacity((textStyle.color?.opacity ?? 1.0) * progress)
+      );
+      final textSpan = TextSpan(text: data[i].label, style: styledText);
       final textPainter = TextPainter(
         text: textSpan,
         textDirection: TextDirection.ltr,
       )..layout();
 
+      final y = chartArea.top + (i * (barHeight + spacing)) + (spacing / 2);
       final xPosition = isReversed
           ? chartArea.right + padding.right / 4
           : chartArea.left - textPainter.width - padding.left / 4;
@@ -761,6 +882,7 @@ class BarChartPainter extends CustomPainter {
   bool shouldRepaint(BarChartPainter oldDelegate) {
     // Determines whether the painter should repaint when properties change
     return oldDelegate.progress != progress ||
+        !listEquals(oldDelegate.barAnimationProgress, barAnimationProgress) ||
         oldDelegate.data != data ||
         oldDelegate.style != style ||
         oldDelegate.showGrid != showGrid ||
@@ -803,6 +925,60 @@ extension on BarChartPainter {
     canvas.drawRRect(rect, paint);
 
     tp.paint(canvas, Offset(x + padding, y + padding));
+  }
+
+  /// Applies animation transformation based on the animation type.
+  /// Returns a tuple of (heightScale, yOffset, alphaScale) for the bar.
+  /// heightScale: How much of the full height to draw (0.0 to 1.0)
+  /// yOffset: Additional y offset from animation effects
+  /// alphaScale: Opacity scale from animation (1.0 = fully opaque)
+  (double, double, double) _applyAnimationEffect(
+    int barIndex,
+    double fullHeight,
+    double zeroY,
+    bool isInverted,
+    BarAnimationType animationType,
+  ) {
+    final animProgress = barAnimationProgress.length > barIndex
+        ? barAnimationProgress[barIndex]
+        : 0.0;
+
+    switch (animationType) {
+      case BarAnimationType.scaleUp:
+        // Grow from zero to full height
+        return (animProgress, 0.0, 1.0);
+
+      case BarAnimationType.slideUp:
+        // Slide up from bottom
+        final heightScale = animProgress;
+        final offset = fullHeight * (1 - animProgress);
+        return (heightScale, offset, 1.0);
+
+      case BarAnimationType.slideDown:
+        // Slide down from top
+        final heightScale = animProgress;
+        final offset = -fullHeight * (1 - animProgress);
+        return (heightScale, offset, 1.0);
+
+      case BarAnimationType.slideLeft:
+        // This doesn't apply to height in vertical bars, so just scale
+        return (animProgress, 0.0, 1.0);
+
+      case BarAnimationType.slideRight:
+        // This doesn't apply to height in vertical bars, so just scale
+        return (animProgress, 0.0, 1.0);
+
+      case BarAnimationType.fadeIn:
+        // Fade in without changing size
+        return (1.0, 0.0, animProgress);
+
+      case BarAnimationType.bounce:
+        // Bounce effect using elastic curve
+        final bounceProgress = animProgress > 0.5
+            ? (1.0 - (animProgress - 0.5) * 0.5)
+            : animProgress * 2.0;
+        return (bounceProgress.clamp(0.0, 1.0), 0.0, 1.0);
+    }
   }
 }
 

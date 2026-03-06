@@ -2,6 +2,217 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+/// Enumeration of animation types for bar chart animations.
+///
+/// Defines different animation styles that can be applied to bars:
+/// - [scaleUp]: Bar grows from zero to full height (default)
+/// - [slideUp]: Bar slides up from bottom
+/// - [slideDown]: Bar slides down from top
+/// - [slideLeft]: Bar slides in from left
+/// - [slideRight]: Bar slides in from right
+/// - [fadeIn]: Bar fades in without size change
+/// - [bounce]: Bar bounces into place with elastic effect
+enum BarAnimationType {
+  scaleUp,
+  slideUp,
+  slideDown,
+  slideLeft,
+  slideRight,
+  fadeIn,
+  bounce,
+}
+
+/// Enumeration of animation triggers for sequential bar animations.
+///
+/// Defines what triggers the next bar's animation:
+/// - [afterDelay]: Wait for a specified delay before next animation
+/// - [afterPrevious]: Wait for previous bar animation to complete before starting
+/// - [immediate]: Start all bars at the same time
+/// - [manual]: Wait for manual trigger via [MaterialBarChartState.triggerAnimation] before starting
+enum BarAnimationTrigger {
+  afterDelay,
+  afterPrevious,
+  immediate,
+  manual,
+}
+
+/// Configuration class for individual bar animations.
+///
+/// This class defines the animation properties for a specific bar in the chart.
+/// It allows fine-grained control over how and when each bar animates.
+class BarAnimationConfig {
+  /// The order in which this bar animates (0-based index).
+  /// Bars with lower order values animate first.
+  /// Multiple bars can have the same order to animate simultaneously.
+  final int animationOrder;
+
+  /// The type of animation to apply to this bar.
+  final BarAnimationType animationType;
+
+  /// What triggers the next animation in the sequence.
+  final BarAnimationTrigger animationTrigger;
+
+  /// The duration of this bar's animation in milliseconds.
+  /// If null, uses the style's default animationDuration.
+  final Duration? duration;
+
+  /// The delay before the next bar's animation starts (in milliseconds).
+  /// Only used when animationTrigger is [BarAnimationTrigger.afterDelay].
+  final Duration delayBeforeNext;
+
+  /// The animation curve for this bar.
+  /// If null, uses the style's default animationCurve.
+  final Curve? curve;
+
+  /// Creates an instance of [BarAnimationConfig].
+  const BarAnimationConfig({
+    this.animationOrder = 0,
+    this.animationType = BarAnimationType.scaleUp,
+    this.animationTrigger = BarAnimationTrigger.afterDelay,
+    this.duration,
+    this.delayBeforeNext = const Duration(milliseconds: 100),
+    this.curve,
+  });
+
+  /// Creates a [BarAnimationConfig] from a JSON map.
+  factory BarAnimationConfig.fromJson(Map<String, dynamic> json) {
+    return BarAnimationConfig(
+      animationOrder: json['animationOrder'] ?? 0,
+      animationType:
+          _parseAnimationType(json['animationType'] ?? 'scaleUp'),
+      animationTrigger:
+          _parseAnimationTrigger(json['animationTrigger'] ?? 'afterDelay'),
+      duration: json['duration'] != null
+          ? Duration(milliseconds: json['duration'] as int)
+          : null,
+      delayBeforeNext: json['delayBeforeNext'] != null
+          ? Duration(milliseconds: json['delayBeforeNext'] as int)
+          : const Duration(milliseconds: 100),
+      curve: json['curve'] != null
+          ? _parseAnimationCurve(json['curve'])
+          : null,
+    );
+  }
+
+  /// Converts the [BarAnimationConfig] to a JSON map.
+  Map<String, dynamic> toJson() {
+    return {
+      'animationOrder': animationOrder,
+      'animationType': _animationTypeToString(animationType),
+      'animationTrigger': _animationTriggerToString(animationTrigger),
+      if (duration != null) 'duration': duration!.inMilliseconds,
+      'delayBeforeNext': delayBeforeNext.inMilliseconds,
+      if (curve != null) 'curve': _curveToString(curve!),
+    };
+  }
+
+  /// Helper to parse animation type from string
+  static BarAnimationType _parseAnimationType(String typeStr) {
+    switch (typeStr.toLowerCase()) {
+      case 'scaleup':
+        return BarAnimationType.scaleUp;
+      case 'slideup':
+        return BarAnimationType.slideUp;
+      case 'slidedown':
+        return BarAnimationType.slideDown;
+      case 'slideleft':
+        return BarAnimationType.slideLeft;
+      case 'slideright':
+        return BarAnimationType.slideRight;
+      case 'fadein':
+        return BarAnimationType.fadeIn;
+      case 'bounce':
+        return BarAnimationType.bounce;
+      default:
+        return BarAnimationType.scaleUp;
+    }
+  }
+
+  /// Helper to convert animation type to string
+  static String _animationTypeToString(BarAnimationType type) {
+    switch (type) {
+      case BarAnimationType.scaleUp:
+        return 'scaleUp';
+      case BarAnimationType.slideUp:
+        return 'slideUp';
+      case BarAnimationType.slideDown:
+        return 'slideDown';
+      case BarAnimationType.slideLeft:
+        return 'slideLeft';
+      case BarAnimationType.slideRight:
+        return 'slideRight';
+      case BarAnimationType.fadeIn:
+        return 'fadeIn';
+      case BarAnimationType.bounce:
+        return 'bounce';
+    }
+  }
+
+  /// Helper to parse animation trigger from string
+  static BarAnimationTrigger _parseAnimationTrigger(String triggerStr) {
+    switch (triggerStr.toLowerCase()) {
+      case 'afterdelay':
+        return BarAnimationTrigger.afterDelay;
+      case 'afterprevious':
+        return BarAnimationTrigger.afterPrevious;
+      case 'immediate':
+        return BarAnimationTrigger.immediate;
+      case 'manual':
+        return BarAnimationTrigger.manual;
+      default:
+        return BarAnimationTrigger.afterDelay;
+    }
+  }
+
+  /// Helper to convert animation trigger to string
+  static String _animationTriggerToString(BarAnimationTrigger trigger) {
+    switch (trigger) {
+      case BarAnimationTrigger.afterDelay:
+        return 'afterDelay';
+      case BarAnimationTrigger.afterPrevious:
+        return 'afterPrevious';
+      case BarAnimationTrigger.immediate:
+        return 'immediate';
+      case BarAnimationTrigger.manual:
+        return 'manual';
+    }
+  }
+
+  /// Helper to parse animation curve from string
+  static Curve _parseAnimationCurve(String curveStr) {
+    switch (curveStr.toLowerCase()) {
+      case 'linear':
+        return Curves.linear;
+      case 'easein':
+        return Curves.easeIn;
+      case 'easeout':
+        return Curves.easeOut;
+      case 'easeinout':
+        return Curves.easeInOut;
+      case 'bouncein':
+        return Curves.bounceIn;
+      case 'bounceout':
+        return Curves.bounceOut;
+      case 'elasticinout':
+        return Curves.elasticInOut;
+      default:
+        return Curves.easeInOut;
+    }
+  }
+
+  /// Helper to convert curve to string
+  static String _curveToString(Curve curve) {
+    if (curve == Curves.linear) return 'linear';
+    if (curve == Curves.easeIn) return 'easeIn';
+    if (curve == Curves.easeOut) return 'easeOut';
+    if (curve == Curves.easeInOut) return 'easeInOut';
+    if (curve == Curves.bounceIn) return 'bounceIn';
+    if (curve == Curves.bounceOut) return 'bounceOut';
+    if (curve == Curves.elasticInOut) return 'elasticInOut';
+    return 'easeInOut';
+  }
+}
+
 /// Represents a data point for a bar chart.
 ///
 /// This model contains the value of the bar, its label, and an optional
@@ -18,11 +229,21 @@ class BarChartData {
   /// If not provided, a default color will be used.
   final Color? color;
 
+  /// Animation configuration for this specific bar.
+  /// Controls the order, type, trigger, and duration of animation.
+  /// If not provided, uses the style's default animation settings.
+  final BarAnimationConfig? animationConfig;
+
   /// Creates an instance of [BarChartData].
   ///
   /// The [value] and [label] parameters are required, while [color]
-  /// is optional.
-  const BarChartData({required this.value, required this.label, this.color});
+  /// and [animationConfig] are optional.
+  const BarChartData({
+    required this.value,
+    required this.label,
+    this.color,
+    this.animationConfig,
+  });
 
   /// Creates a [BarChartData] instance from a JSON map.
   /// Supports both simple and Plotly-compatible formats.
@@ -35,6 +256,9 @@ class BarChartData {
           : json['marker']?['color'] != null
               ? parseColor(json['marker']['color'])
               : null,
+      animationConfig: json['animationConfig'] != null
+          ? BarAnimationConfig.fromJson(json['animationConfig'] as Map<String, dynamic>)
+          : null,
     );
   }
 
@@ -45,6 +269,7 @@ class BarChartData {
       'x': label,
       'y': value,
       if (color != null) 'color': colorToHex(color!),
+      if (animationConfig != null) 'animationConfig': animationConfig!.toJson(),
     };
   }
 
@@ -142,6 +367,20 @@ class BarChartStyle {
   /// Each bar in a group needs its own color specified in the BarChartData.color field.
   final bool groupByLabel;
 
+  /// Default animation type for all bars when not specified individually.
+  /// Can be overridden per-bar using BarChartData.animationConfig.
+  final BarAnimationType defaultAnimationType;
+
+  /// Default animation trigger for all bars when not specified individually.
+  /// Controls what triggers the next bar's animation to start.
+  /// Can be overridden per-bar using BarChartData.animationConfig.
+  final BarAnimationTrigger defaultAnimationTrigger;
+
+  /// Default delay before the next bar's animation starts (in milliseconds).
+  /// Only used when defaultAnimationTrigger is [BarAnimationTrigger.afterDelay].
+  /// Can be overridden per-bar using BarChartData.animationConfig.
+  final Duration defaultDelayBeforeNext;
+
   /// Creates an instance of [BarChartStyle] with customizable properties.
   ///
   /// The following parameters can be customized:
@@ -159,6 +398,9 @@ class BarChartStyle {
   /// - [rotation]: Rotation angle in degrees (default is 0).
   /// - [orientation]: Chart orientation 'v' or 'h' (default is 'v').
   /// - [groupByLabel]: Group bars by label so same labels have bars side by side (default is false).
+  /// - [defaultAnimationType]: Default animation type for bars (default is scaleUp).
+  /// - [defaultAnimationTrigger]: Default animation trigger (default is afterDelay).
+  /// - [defaultDelayBeforeNext]: Default delay before next animation (default is 100ms).
   const BarChartStyle({
     this.barColor = Colors.blue,
     this.gridColor = Colors.grey,
@@ -174,6 +416,9 @@ class BarChartStyle {
     this.rotation = 0.0,
     this.orientation = 'v',
     this.groupByLabel = false,
+    this.defaultAnimationType = BarAnimationType.scaleUp,
+    this.defaultAnimationTrigger = BarAnimationTrigger.afterDelay,
+    this.defaultDelayBeforeNext = const Duration(milliseconds: 100),
   });
 
   /// Creates a [BarChartStyle] instance from a JSON map.
@@ -249,6 +494,15 @@ class BarChartStyle {
       rotation: rotation,
       orientation: orientation,
       groupByLabel: json['groupByLabel'] ?? false,
+      defaultAnimationType: BarAnimationConfig._parseAnimationType(
+        json['defaultAnimationType'] ?? 'scaleUp',
+      ),
+      defaultAnimationTrigger: BarAnimationConfig._parseAnimationTrigger(
+        json['defaultAnimationTrigger'] ?? 'afterDelay',
+      ),
+      defaultDelayBeforeNext: json['defaultDelayBeforeNext'] != null
+          ? Duration(milliseconds: json['defaultDelayBeforeNext'] as int)
+          : const Duration(milliseconds: 100),
     );
   }
 
@@ -267,6 +521,9 @@ class BarChartStyle {
       'rotation': rotation,
       'orientation': orientation,
       'groupByLabel': groupByLabel,
+      'defaultAnimationType': BarAnimationConfig._animationTypeToString(defaultAnimationType),
+      'defaultAnimationTrigger': BarAnimationConfig._animationTriggerToString(defaultAnimationTrigger),
+      'defaultDelayBeforeNext': defaultDelayBeforeNext.inMilliseconds,
       if (gradientColors != null)
         'gradientColors':
             gradientColors!.map((c) => BarChartData.colorToHex(c)).toList(),

@@ -11,6 +11,8 @@ import 'models.dart';
 class AreaChartPainter extends CustomPainter {
   final List<AreaChartSeries> series; // List of data series to render.
   final double progress; // Animation progress (0.0 to 1.0).
+  final List<double> seriesAnimationProgress; // Per-series animation progress
+  final Map<int, double> segmentAnimationProgress; // Per-segment animation progress
   final AreaChartStyle style; // Style configuration for the chart.
   final Offset? tooltipPosition; // Position of the cursor or hover for tooltips.
 
@@ -18,6 +20,8 @@ class AreaChartPainter extends CustomPainter {
     required this.series,
     required this.progress,
     required this.style,
+    this.seriesAnimationProgress = const [],
+    this.segmentAnimationProgress = const {},
     this.tooltipPosition,
   });
 
@@ -31,7 +35,7 @@ class AreaChartPainter extends CustomPainter {
       _drawGrid(canvas, chartArea);
     }
 
-    // Render each series in the chart.
+    // Render each series in the chart with segment support.
     for (int i = 0; i < series.length; i++) {
       final seriesData = series[i];
       // Get the colors for the series (fallback to default style colors if not defined).
@@ -39,22 +43,70 @@ class AreaChartPainter extends CustomPainter {
       final topFill = color.withValues(alpha: style.areaFillOpacityTop.clamp(0.0, 1.0));
       final bottomFill = color.withValues(alpha: style.areaFillOpacityBottom.clamp(0.0, 1.0));
 
-      // Draw the area below the line for the series.
-      _drawArea(canvas, chartArea, seriesData, topFill, bottomFill);
+      // Use per-series animation progress if available, otherwise use global progress
+      final seriesProgress = seriesAnimationProgress.isNotEmpty && i < seriesAnimationProgress.length ? seriesAnimationProgress[i] : progress;
 
-      // Draw the line connecting the data points.
-      _drawLine(canvas, chartArea, seriesData, color);
+      // Group data points by segmentAnimationOrder
+      final segmentGroups = <int, List<int>>{};
+      for (int j = 0; j < seriesData.dataPoints.length; j++) {
+        final point = seriesData.dataPoints[j];
+        final segmentOrder = point.segmentAnimationOrder;
+        if (!segmentGroups.containsKey(segmentOrder)) {
+          segmentGroups[segmentOrder] = [];
+        }
+        segmentGroups[segmentOrder]!.add(j);
+      }
 
-      // Draw the individual data points if enabled.
-      if (seriesData.showPoints ?? style.showPoints) {
-        _drawPoints(canvas, chartArea, seriesData, color);
+      final sortedOrders = segmentGroups.keys.toList()..sort();
+
+      // Draw each segment group based on whether it has explicit animation config
+      for (final segmentOrder in sortedOrders) {
+        final indices = segmentGroups[segmentOrder]!;
+        if (indices.isEmpty) continue;
+
+        // Check if this segment has explicit animation config
+        final hasSegmentConfig = style.segmentAnimationConfigs.containsKey(segmentOrder);
+
+        if (hasSegmentConfig) {
+          // Draw with segment animation (only during segment phase)
+          final segmentProgress = segmentAnimationProgress[segmentOrder] ?? 0.0;
+          if (segmentProgress > 0.001) {
+            _drawSegmentGroup(
+              canvas,
+              chartArea,
+              seriesData,
+              indices,
+              color,
+              topFill,
+              bottomFill,
+              segmentProgress,
+              segmentOrder,
+            );
+          }
+        } else {
+          // Draw with series animation (default behavior for segments without explicit config)
+          if (seriesProgress > 0.0) {
+            _drawSegmentGroup(
+              canvas,
+              chartArea,
+              seriesData,
+              indices,
+              color,
+              topFill,
+              bottomFill,
+              seriesProgress,
+              segmentOrder,
+              useSeriesAnimation: true,
+            );
+          }
+        }
       }
     }
 
-    // Draw crosshair if enabled and a hover position is available //adding code
-    if (style.crosshair?.enabled == true && tooltipPosition != null) { //adding code
-      _drawCrosshair(canvas, chartArea);//adding code
-    }//adding code
+    // Draw crosshair if enabled and a hover position is available
+    if (style.crosshair?.enabled == true && tooltipPosition != null) {
+      _drawCrosshair(canvas, chartArea);
+    }
 
     // Draw baseline if enabled
     if (style.baseline?.show == true) {
@@ -71,206 +123,254 @@ class AreaChartPainter extends CustomPainter {
     }
   }
 
-  /// Draws the filled area below the line of the chart.
-  void _drawArea(
+  /// Draws a single segment group with animation.
+  ///
+  /// This unified method handles both series-animation-phase and segment-animation-phase rendering.
+  /// When useSeriesAnimation is true, applies series-level animation effects.
+  /// When false, applies segment-level animation effects.
+  void _drawSegmentGroup(
     Canvas canvas,
     Rect chartArea,
     AreaChartSeries seriesData,
+    List<int> indices,
     Color color,
-    Color gradientColor,
-  ) {
+    Color topFill,
+    Color bottomFill,
+    double progress,
+    int segmentOrder, {
+    bool useSeriesAnimation = false,
+  }) {
     final points = _getSeriesPoints(chartArea, seriesData);
-    if (points.isEmpty) return;
+    if (points.isEmpty || indices.isEmpty) return;
+
+    // Get start and end indices for this segment
+    // Important: indices refer to dataPoint indices, but points might be shorter due to xSpanSlots
+    // Clamp indices to the actual points length
+    int startIdx = indices.first.clamp(0, points.length - 1);
+    int endIdx = indices.last.clamp(0, points.length - 1);
+
+    // For segment animations (not series animation), connect to previous segment's last point
+    // This ensures continuity when revealing new segments progressively
+    if (!useSeriesAnimation && startIdx > 0) {
+      startIdx = (startIdx - 1).clamp(0, points.length - 1); // Include previous point to connect the area/line
+    }
+
+    // Ensure we have valid indices
+    if (startIdx >= points.length || endIdx >= points.length || startIdx > endIdx) return;
+
+    final segmentPoints = points.sublist(startIdx, endIdx + 1);
+
+    if (segmentPoints.length < 2) return;
+
+    // Determine animation effects based on phase
+    double opacity = 1.0;
+    double offsetY = 0.0;
+    bool shouldDrawProgressively = true;
+
+    if (useSeriesAnimation) {
+      // Apply series animation effects
+      final animConfig = seriesData.animationConfig;
+      final animType = animConfig?.animationType ?? AreaAnimationType.drawLine;
+      if (animType == AreaAnimationType.fadeIn) {
+        opacity = progress;
+        shouldDrawProgressively = false;
+      } else if (animType == AreaAnimationType.slideUp) {
+        opacity = progress;
+        offsetY = (1.0 - progress) * 20.0;
+        shouldDrawProgressively = false;
+      }
+    } else {
+      // Apply segment animation effects
+      final segmentConfig = style.segmentAnimationConfigs[segmentOrder];
+      if (segmentConfig != null) {
+        final animType = segmentConfig.animationType;
+        if (animType == SegmentAnimationType.fadeIn) {
+          opacity = progress;
+          shouldDrawProgressively = false;
+        } else if (animType == SegmentAnimationType.slideUp) {
+          opacity = progress;
+          offsetY = (1.0 - progress) * 20.0;
+          shouldDrawProgressively = false;
+        }
+        // drawPoint means progressive drawing
+      }
+    }
+
+    // Early exit for zero progress/opacity
+    if (shouldDrawProgressively && progress <= 0.0) return;
+    if (!shouldDrawProgressively && opacity <= 0.0) return;
+
+    canvas.save();
+    if (offsetY != 0.0) {
+      canvas.translate(0, offsetY);
+    }
+
+    // Draw the area
+    _drawSegmentArea(canvas, chartArea, segmentPoints, topFill, bottomFill, progress, opacity, shouldDrawProgressively);
+
+    // Draw the line
+    _drawSegmentLine(canvas, segmentPoints, seriesData, color, progress, opacity, shouldDrawProgressively);
+
+    // Draw points if enabled
+    if (seriesData.showPoints ?? style.showPoints) {
+      _drawSegmentPoints(canvas, segmentPoints, seriesData, color, progress, opacity, shouldDrawProgressively, !useSeriesAnimation && startIdx > 0);
+    }
+
+    canvas.restore();
+  }
+
+  /// Draws the area for a segment
+  void _drawSegmentArea(
+    Canvas canvas,
+    Rect chartArea,
+    List<Offset> segmentPoints,
+    Color topFill,
+    Color bottomFill,
+    double progress,
+    double opacity,
+    bool shouldDrawProgressively,
+  ) {
+    // Safety check: need at least 2 points to draw an area
+    if (segmentPoints.isEmpty) return;
 
     // Create a path that represents the area below the line.
     final path = Path();
-    path.moveTo(
-      points.first.dx,
-      chartArea.bottom,
-    ); // Start at the bottom of the chart.
-    path.lineTo(
-      points.first.dx,
-      points.first.dy,
-    ); // Move to the first data point.
+    path.moveTo(segmentPoints.first.dx, chartArea.bottom);
+    path.lineTo(segmentPoints.first.dx, segmentPoints.first.dy);
 
-    // Connect all data points with lines.
-    for (int i = 1; i < points.length; i++) {
-      path.lineTo(points[i].dx, points[i].dy);
+    for (int i = 1; i < segmentPoints.length; i++) {
+      path.lineTo(segmentPoints[i].dx, segmentPoints[i].dy);
     }
 
-    path.lineTo(
-      points.last.dx,
-      chartArea.bottom,
-    ); // Close the path at the bottom.
+    path.lineTo(segmentPoints.last.dx, chartArea.bottom);
     path.close();
 
-    // Create a gradient paint for the area fill.
+    // Create a gradient paint for the area fill with opacity.
     final paint = Paint()
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [color, gradientColor],
+        colors: [
+          topFill.withValues(alpha: opacity * topFill.a),
+          bottomFill.withValues(alpha: opacity * bottomFill.a),
+        ],
       ).createShader(chartArea)
       ..style = PaintingStyle.fill;
 
-    // Apply animation progress to the path.
-    final pathMetrics = path.computeMetrics().first;
-    final animatedPath = pathMetrics.extractPath(
-      0.0,
-      pathMetrics.length * progress,
-    );
+    // Apply animation progress to the path if needed
+    if (shouldDrawProgressively) {
+      if (progress <= 0.0) return;
+      if (progress >= 1.0) {
+        canvas.drawPath(path, paint);
+        return;
+      }
 
-    canvas.drawPath(animatedPath, paint);
+      final startX = segmentPoints.first.dx;
+      final endX = segmentPoints.last.dx;
+      final revealX = startX + (endX - startX) * progress;
+
+      canvas.save();
+      canvas.clipRect(Rect.fromLTRB(startX, chartArea.top, revealX, chartArea.bottom));
+      canvas.drawPath(path, paint);
+      canvas.restore();
+    } else {
+      canvas.drawPath(path, paint);
+    }
   }
 
-  /// Draws the line connecting the data points.
-  void _drawLine(
+  /// Draws the line for a segment
+  void _drawSegmentLine(
     Canvas canvas,
-    Rect chartArea,
+    List<Offset> segmentPoints,
     AreaChartSeries seriesData,
     Color color,
+    double progress,
+    double opacity,
+    bool shouldDrawProgressively,
   ) {
-    final points = _getSeriesPoints(chartArea, seriesData);
-    if (points.isEmpty) return;
-
-    // Create a path for the line connecting data points.
+    // Safety check: need at least 1 point to draw
+    if (segmentPoints.isEmpty) return;
     final path = Path();
-    path.moveTo(points.first.dx, points.first.dy);
+    path.moveTo(segmentPoints.first.dx, segmentPoints.first.dy);
 
-    // Draw straight lines between consecutive points.
-    for (int i = 1; i < points.length; i++) {
-      path.lineTo(points[i].dx, points[i].dy);
+    for (int i = 1; i < segmentPoints.length; i++) {
+      path.lineTo(segmentPoints[i].dx, segmentPoints[i].dy);
     }
 
-    // Define the paint for the line.
     final paint = Paint()
-      ..color = color
+      ..color = color.withValues(alpha: opacity)
       ..strokeWidth = seriesData.lineWidth ?? style.defaultLineWidth
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
 
-    // Apply animation progress to the path.
-    final pathMetrics = path.computeMetrics().first;
-    final animatedPath = pathMetrics.extractPath(
-      0.0,
-      pathMetrics.length * progress,
-    );
-
-    canvas.drawPath(animatedPath, paint);
+    if (shouldDrawProgressively) {
+      final pathMetrics = path.computeMetrics().toList();
+      if (pathMetrics.isEmpty) return;
+      final metric = pathMetrics.first;
+      final animatedPath = metric.extractPath(0.0, metric.length * progress);
+      canvas.drawPath(animatedPath, paint);
+    } else {
+      canvas.drawPath(path, paint);
+    }
   }
 
-  /// Draws data points as circles and displays tooltips when hovered.
-  void _drawPoints(
+  /// Draws points for a segment
+  void _drawSegmentPoints(
     Canvas canvas,
-    Rect chartArea,
+    List<Offset> segmentPoints,
     AreaChartSeries seriesData,
     Color color,
+    double progress,
+    double opacity,
+    bool shouldDrawProgressively,
+    bool hasConnectingPoint,
   ) {
-    final points = _getSeriesPoints(chartArea, seriesData);
-    final progressPoints = (points.length * progress).floor(); // Limit points based on animation progress.
+    // Safety check: need at least 1 point to draw
+    if (segmentPoints.isEmpty) return;
     final pointSize = seriesData.pointSize ?? style.defaultPointSize;
+    final pointPaint = Paint()
+      ..color = color.withValues(alpha: opacity)
+      ..style = PaintingStyle.fill;
 
-    // Use default tooltip configuration if series-specific config is not available.
-    const defaultTooltip = TooltipConfig();
-    final seriesTooltip = seriesData.tooltipConfig ?? defaultTooltip;
+    final borderPaint = Paint()
+      ..color = style.backgroundColor.withValues(alpha: opacity)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
 
-    // Iterate through the visible points.
-    for (int i = 0; i < progressPoints; i++) {
-      final dataPoint = seriesData.dataPoints[i];
-      final tooltipConfig = dataPoint.tooltipConfig ?? seriesTooltip; // Use point-specific config or fallback.
+    if (shouldDrawProgressively) {
+      // Calculate cumulative distances to each point in the segment
+      final distancesToPoints = <double>[0.0];
+      double cumulativeDist = 0.0;
+      for (int i = 0; i < segmentPoints.length - 1; i++) {
+        final p1 = segmentPoints[i];
+        final p2 = segmentPoints[i + 1];
+        cumulativeDist += (p2 - p1).distance;
+        distancesToPoints.add(cumulativeDist);
+      }
 
-      // Draw the data point as a filled circle.
-      final pointPaint = Paint()
-        ..color = color
-        ..style = PaintingStyle.fill;
+      final totalDist = cumulativeDist > 0 ? cumulativeDist : 1.0;
+      final drawnDistance = totalDist * progress;
 
-      canvas.drawCircle(points[i], pointSize, pointPaint);
-
-      // Draw a border around the point for better visibility.
-      final borderPaint = Paint()
-        ..color = style.backgroundColor
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2;
-      canvas.drawCircle(points[i], pointSize, borderPaint);
-
-      // Check if tooltip should be displayed based on hover distance.
-      if (tooltipPosition != null) {
-        final distance = (points[i] - tooltipPosition!).distance;
-        if (distance <= tooltipConfig.hoverRadius) {
-          _drawTooltip(
-            canvas,
-            points[i],
-            seriesData.name,
-            dataPoint,
-            chartArea,
-            tooltipConfig,
-          );
+      // Show points progressively as line reaches them
+      for (int i = 0; i < segmentPoints.length; i++) {
+        // For segment animations, always show the first point (connecting point from previous segment)
+        final isConnectingPoint = hasConnectingPoint && i == 0;
+        if (isConnectingPoint || drawnDistance >= distancesToPoints[i]) {
+          canvas.drawCircle(segmentPoints[i], pointSize, pointPaint);
+          canvas.drawCircle(segmentPoints[i], pointSize, borderPaint);
         }
+      }
+    } else {
+      // Show all points with opacity effect
+      for (final point in segmentPoints) {
+        canvas.drawCircle(point, pointSize, pointPaint);
+        canvas.drawCircle(point, pointSize, borderPaint);
       }
     }
   }
 
   /// Draws a tooltip near a hovered data point.
-  void _drawTooltip(
-    Canvas canvas,
-    Offset point,
-    String seriesName,
-    AreaChartData dataPoint,
-    Rect chartArea,
-    TooltipConfig config,
-  ) {
-    // If custom content is provided, we can't render it directly on canvas
-    // The widget layer will need to handle this
-    // For now, we'll draw the text-based tooltip
-    final text = config.text ?? '$seriesName: ${dataPoint.value.toStringAsFixed(1)}';
-    final textSpan = TextSpan(text: text, style: config.textStyle);
-
-    final textPainter = TextPainter(
-      text: textSpan,
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: config.maxWidth ?? double.infinity);
-
-    // Calculate tooltip dimensions and position.
-    final tooltipWidth = textPainter.width + config.padding.horizontal;
-    final tooltipHeight = textPainter.height + config.padding.vertical;
-    var tooltipX = point.dx - tooltipWidth / 2;
-    var tooltipY = point.dy - tooltipHeight - 10;
-
-    // Adjust tooltip position if it goes outside the chart area.
-    tooltipX = tooltipX.clamp(chartArea.left, chartArea.right - tooltipWidth);
-    if (tooltipY < chartArea.top) {
-      tooltipY = point.dy + 10;
-    }
-
-    // Draw tooltip background using custom decoration or default
-    if (config.decoration != null) {
-      config.decoration!.createBoxPainter().paint(
-        canvas,
-        Offset(tooltipX, tooltipY),
-        ImageConfiguration(size: Size(tooltipWidth, tooltipHeight)),
-      );
-    } else {
-      final bgPaint = Paint()
-        ..color = config.backgroundColor
-        ..style = PaintingStyle.fill;
-
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(tooltipX, tooltipY, tooltipWidth, tooltipHeight),
-          Radius.circular(config.borderRadius),
-        ),
-        bgPaint,
-      );
-    }
-
-    // Render the tooltip text.
-    textPainter.paint(
-      canvas,
-      Offset(tooltipX + config.padding.left, tooltipY + config.padding.top),
-    );
-  }
-
   /// Draws the grid lines and their labels (horizontal and vertical).
   void _drawGrid(Canvas canvas, Rect chartArea) {
     final paint = Paint()
@@ -371,9 +471,7 @@ class AreaChartPainter extends CustomPainter {
     // Generate a list of points representing the chart's data. Each point is calculated
     // by mapping the data value to the Y-coordinate within the chart area.
     final slots = style.xSpanSlots ?? seriesData.dataPoints.length;
-    final count = seriesData.dataPoints.length < slots
-        ? seriesData.dataPoints.length
-        : slots;
+    final count = seriesData.dataPoints.length < slots ? seriesData.dataPoints.length : slots;
     return List.generate(count, (i) {
       final x = _getXCoordinate(
         chartArea,
@@ -397,7 +495,7 @@ class AreaChartPainter extends CustomPainter {
 
   double _getMaxValue() {
     // Finds the maximum value across all series within the effective slot window.
-    final slots = style.xSpanSlots; 
+    final slots = style.xSpanSlots;
     final values = <double>[];
     for (final s in series) {
       final takeCount = slots == null ? s.dataPoints.length : min(s.dataPoints.length, slots);
@@ -412,7 +510,7 @@ class AreaChartPainter extends CustomPainter {
     // Finds the minimum value across all series within the effective slot window.
     // Forces the Y-axis to start from zero if specified in the style.
     if (style.forceYAxisFromZero) return 0;
-    final slots = style.xSpanSlots; 
+    final slots = style.xSpanSlots;
     final values = <double>[];
     for (final s in series) {
       final takeCount = slots == null ? s.dataPoints.length : min(s.dataPoints.length, slots);
@@ -523,37 +621,37 @@ class AreaChartPainter extends CustomPainter {
   /// Draws a dotted horizontal baseline at the height of the first data point value
   void _drawBaseline(Canvas canvas, Rect chartArea) {
     if (series.isEmpty || series.first.dataPoints.isEmpty) return;
-    
+
     final config = style.baseline!;
     final firstValue = series.first.dataPoints.first.value;
     final seriesColor = series.first.color ?? style.colors.first;
     final baselineColor = config.color ?? seriesColor;
-    
+
     // Calculate Y position for the first value
     final maxValue = _getMaxValue();
     final minValue = _getMinValue();
     final valueRange = maxValue - minValue;
-    
+
     if (valueRange == 0) return;
-    
+
     final normalizedValue = (firstValue - minValue) / valueRange;
     final y = chartArea.bottom - (normalizedValue * chartArea.height);
-    
+
     // Create paint for the dotted line
     final paint = Paint()
       ..color = baselineColor
       ..strokeWidth = config.strokeWidth
       ..style = PaintingStyle.stroke;
-    
+
     // Draw dotted line across the chart
     final path = Path();
     double startX = chartArea.left;
     final endX = chartArea.right;
-    
+
     // Create dashed pattern
     final dashWidth = config.dashPattern[0];
     final dashSpace = config.dashPattern.length > 1 ? config.dashPattern[1] : dashWidth;
-    
+
     while (startX < endX) {
       path.moveTo(startX, y);
       startX += dashWidth;
@@ -561,7 +659,7 @@ class AreaChartPainter extends CustomPainter {
       path.lineTo(startX, y);
       startX += dashSpace;
     }
-    
+
     canvas.drawPath(path, paint);
   }
 
@@ -584,7 +682,7 @@ class AreaChartPainter extends CustomPainter {
       final markerColor = keyEvent.markerColor ?? config.defaultColor;
       final markerSize = keyEvent.markerSize ?? config.size; // Use custom size if provided
       final verticalOffset = keyEvent.verticalOffset ?? config.verticalOffset; // Use custom offset if provided
-      
+
       // Calculate marker position (above the line point)
       final markerOffset = Offset(
         points[i].dx,
@@ -620,7 +718,7 @@ class AreaChartPainter extends CustomPainter {
     // All tooltips are now HTML-based and rendered by the widget overlay
     // If no HTML content is provided, nothing is displayed
     return;
-  } 
+  }
 
   @override
   bool shouldRepaint(AreaChartPainter oldDelegate) {
