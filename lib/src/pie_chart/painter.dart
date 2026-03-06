@@ -108,7 +108,10 @@ class PieChartPainter extends CustomPainter {
     // Iterate through each data point to draw the respective pie slice.
     for (int i = 0; i < data.length; i++) {
       // Calculate the sweep angle for the current slice based on its value.
-      final sweepAngle = (sliceSizes[i] / total) * 2 * pi * progress;
+      // When slice animations are enabled, draw the full sweep immediately (progress = 1.0)
+      // so only the pop-out effect animates, not the drawing of the pie.
+      final effectiveProgress = style.sliceAnimationsEnabled ? 1.0 : progress;
+      final sweepAngle = (sliceSizes[i] / total) * 2 * pi * effectiveProgress;
       // Determine the color for the segment, falling back to default colors if necessary.
       final segmentColor =
           data[i].color ?? style.defaultColors[i % style.defaultColors.length];
