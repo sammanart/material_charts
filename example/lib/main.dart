@@ -491,6 +491,7 @@ class _ChartsDemoState extends State<ChartsDemo> {
     const GanttChartExample(),
     const CandlestickChartExample(),
     const HybridChartAnimationExample(),
+    const HybridChartMixedAnimationsExample(),
     const HybridChartExample(),
   ];
 
@@ -520,6 +521,7 @@ class _ChartsDemoState extends State<ChartsDemo> {
     'Gantt Chart',
     'Candlestick Chart',
     'Hybrid Chart: Animation Examples',
+    'Hybrid Chart: Mixed Manual Animations',
     'Hybrid Chart (Area/Candlestick)',
   ];
 
@@ -3647,6 +3649,224 @@ class _AllManualSegmentAnimationHybridChartWidgetState extends State<_AllManualS
               axisConfig: const HybridChartAxisConfig(
                 priceDivisions: 5,
                 dateDivisions: 4,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// Hybrid Chart Mixed Animation Example
+class HybridChartMixedAnimationsExample extends StatefulWidget {
+  const HybridChartMixedAnimationsExample({super.key});
+
+  @override
+  State<HybridChartMixedAnimationsExample> createState() => _HybridChartMixedAnimationsExampleState();
+}
+
+class _HybridChartMixedAnimationsExampleState extends State<HybridChartMixedAnimationsExample> {
+  late GlobalKey<State> _chartKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _chartKey = GlobalKey<State>();
+  }
+
+  void _triggerOrder(int order) {
+    final state = _chartKey.currentState;
+    if (state != null) {
+      (state as dynamic).triggerAnimation(order);
+    }
+  }
+
+  void _reverseOrder(int order) {
+    final state = _chartKey.currentState;
+    if (state != null) {
+      (state as dynamic).reverseAnimation(order);
+    }
+  }
+
+  List<HybridChartData> _buildSeriesData(double offset) {
+    return [
+      HybridChartData(label: 'Mon', open: 98 + offset, high: 108 + offset, low: 95 + offset, close: 102 + offset, segmentAnimationOrder: 0),
+      HybridChartData(label: 'Tue', open: 102 + offset, high: 112 + offset, low: 100 + offset, close: 108 + offset, segmentAnimationOrder: 0),
+      HybridChartData(label: 'Wed', open: 108 + offset, high: 118 + offset, low: 106 + offset, close: 114 + offset, segmentAnimationOrder: 1),
+      HybridChartData(label: 'Thu', open: 114 + offset, high: 120 + offset, low: 110 + offset, close: 116 + offset, segmentAnimationOrder: 1),
+      HybridChartData(label: 'Fri', open: 116 + offset, high: 126 + offset, low: 114 + offset, close: 123 + offset, segmentAnimationOrder: 2),
+      HybridChartData(label: 'Sat', open: 123 + offset, high: 128 + offset, low: 119 + offset, close: 121 + offset, segmentAnimationOrder: 2),
+      HybridChartData(label: 'Sun', open: 121 + offset, high: 130 + offset, low: 118 + offset, close: 127 + offset, segmentAnimationOrder: 3),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final baselineSeries = HybridChartSeries(
+      name: 'Baseline (Auto Line)',
+      dataPoints: _buildSeriesData(0),
+      color: Colors.indigo,
+      lineWidth: 2.2,
+      showPoints: true,
+      pointSize: 5,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 0,
+        animationType: AreaAnimationType.drawLine,
+        animationTrigger: AreaAnimationTrigger.afterDelay,
+        duration: Duration(milliseconds: 1000),
+        delayBeforeNext: Duration(milliseconds: 350),
+      ),
+    );
+
+    final signalSeries = HybridChartSeries(
+      name: 'Signal (Manual Line)',
+      dataPoints: _buildSeriesData(4),
+      color: Colors.teal,
+      lineWidth: 2.2,
+      showPoints: true,
+      pointSize: 5,
+      animationConfig: const AreaAnimationConfig(
+        animationOrder: 10,
+        animationType: AreaAnimationType.slideUp,
+        animationTrigger: AreaAnimationTrigger.manual,
+        duration: Duration(milliseconds: 950),
+      ),
+    );
+
+    final style = HybridChartStyle(
+      colors: const [Colors.indigo, Colors.teal],
+      animationCurve: Curves.easeInOut,
+      animationDuration: const Duration(milliseconds: 1100),
+      defaultAnimationType: AreaAnimationType.drawLine,
+      defaultAnimationTrigger: AreaAnimationTrigger.afterDelay,
+      defaultDelayBeforeNext: const Duration(milliseconds: 350),
+      showGrid: true,
+      autoHorizontalGridLines: 4,
+      autoVerticalGridLines: 6,
+      padding: const EdgeInsets.fromLTRB(10, 20, 60, 20),
+      segmentAnimationConfigs: {
+        1: const SegmentAnimationConfig(
+          segmentAnimationOrder: 1,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: AreaAnimationTrigger.afterDelay,
+          duration: Duration(milliseconds: 650),
+          delayBeforeNext: Duration(milliseconds: 150),
+        ),
+        2: const SegmentAnimationConfig(
+          segmentAnimationOrder: 2,
+          animationType: SegmentAnimationType.slideUp,
+          animationTrigger: AreaAnimationTrigger.manual,
+          duration: Duration(milliseconds: 700),
+        ),
+        3: const SegmentAnimationConfig(
+          segmentAnimationOrder: 3,
+          animationType: SegmentAnimationType.drawPoint,
+          animationTrigger: AreaAnimationTrigger.manual,
+          duration: Duration(milliseconds: 850),
+        ),
+      },
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Hybrid Chart - Mixed Line + Segment Animations',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Line 1 and early segments animate automatically. Trigger the second line and later segments with buttons.',
+          style: TextStyle(fontSize: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ElevatedButton.icon(
+              onPressed: () => _triggerOrder(10),
+              icon: const Icon(Icons.show_chart),
+              label: const Text('Play Manual Line'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => _reverseOrder(10),
+              icon: const Icon(Icons.undo),
+              label: const Text('Reverse Manual Line'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal.shade300,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => _triggerOrder(2),
+              icon: const Icon(Icons.timeline),
+              label: const Text('Play Segment 2'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => _triggerOrder(3),
+              icon: const Icon(Icons.timeline),
+              label: const Text('Play Segment 3'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                _triggerOrder(10);
+                _triggerOrder(2);
+                _triggerOrder(3);
+              },
+              icon: const Icon(Icons.play_circle_fill),
+              label: const Text('Play All Manual'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _chartKey = GlobalKey<State>();
+                });
+              },
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Reset Demo'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade100,
+                foregroundColor: Colors.red.shade900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            height: 360,
+            child: MaterialHybridChart(
+              key: _chartKey,
+              series: [baselineSeries, signalSeries],
+              width: 620,
+              height: 360,
+              style: style,
+              axisConfig: const HybridChartAxisConfig(
+                priceDivisions: 5,
+                dateDivisions: 6,
               ),
             ),
           ),

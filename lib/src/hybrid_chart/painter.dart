@@ -280,43 +280,72 @@ class HybridChartPainter extends CustomPainter {
         final indices = segmentGroups[segmentOrder]!;
         if (indices.isEmpty) continue;
 
+  
+        final contiguousRuns = _splitContiguousRuns(indices);
+
         final hasSegmentConfig = style.segmentAnimationConfigs.containsKey(segmentOrder);
 
-        if (hasSegmentConfig) {
-          final segmentProgress = segmentAnimationProgress[segmentOrder] ?? 0.0;
-          if (segmentProgress > 0.001) {
-            _drawSegmentGroup(
-              canvas,
-              chartArea,
-              seriesData,
-              indices,
-              color,
-              topFill,
-              bottomFill,
-              segmentProgress,
-              segmentOrder,
-              skipFill: skipFill,
-            );
-          }
-        } else {
-          if (seriesProgress > 0.0) {
-            _drawSegmentGroup(
-              canvas,
-              chartArea,
-              seriesData,
-              indices,
-              color,
-              topFill,
-              bottomFill,
-              seriesProgress,
-              segmentOrder,
-              useSeriesAnimation: true,
-              skipFill: skipFill,
-            );
+        for (final runIndices in contiguousRuns) {
+          if (runIndices.isEmpty) continue;
+
+          if (hasSegmentConfig) {
+            final segmentProgress = segmentAnimationProgress[segmentOrder] ?? 0.0;
+            if (segmentProgress > 0.001) {
+              _drawSegmentGroup(
+                canvas,
+                chartArea,
+                seriesData,
+                runIndices,
+                color,
+                topFill,
+                bottomFill,
+                segmentProgress,
+                segmentOrder,
+                skipFill: skipFill,
+              );
+            }
+          } else {
+            if (seriesProgress > 0.0) {
+              _drawSegmentGroup(
+                canvas,
+                chartArea,
+                seriesData,
+                runIndices,
+                color,
+                topFill,
+                bottomFill,
+                seriesProgress,
+                segmentOrder,
+                useSeriesAnimation: true,
+                skipFill: skipFill,
+              );
+            }
           }
         }
       }
     }
+  }
+
+  List<List<int>> _splitContiguousRuns(List<int> indices) {
+    if (indices.isEmpty) return const [];
+
+    final sorted = List<int>.from(indices)..sort();
+    final runs = <List<int>>[];
+    var currentRun = <int>[sorted.first];
+
+    for (int i = 1; i < sorted.length; i++) {
+      final prev = sorted[i - 1];
+      final curr = sorted[i];
+      if (curr == prev + 1) {
+        currentRun.add(curr);
+      } else {
+        runs.add(currentRun);
+        currentRun = <int>[curr];
+      }
+    }
+
+    runs.add(currentRun);
+    return runs;
   }
 
   void _drawSegmentGroup(
@@ -385,7 +414,7 @@ class HybridChartPainter extends CustomPainter {
       canvas.translate(0, offsetY);
     }
 
-    if (!skipFill) {
+    if (!skipFill && segmentPoints.length >= 2) {
       _drawAreaFill(canvas, chartArea, segmentPoints, topFill, bottomFill, progress, opacity, shouldDrawProgressively);
     }
 
@@ -490,14 +519,14 @@ class HybridChartPainter extends CustomPainter {
     path.close();
 
     final paint = Paint()
-      ..shader = ui.Gradient.linear(
-        Offset(0, points[0].dy),
-        Offset(0, chartArea.bottom),
-        [
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
           topColor.withValues(alpha: opacity * topColor.a),
           bottomColor.withValues(alpha: opacity * bottomColor.a),
         ],
-      );
+      ).createShader(chartArea);
 
     if (shouldDrawProgressively) {
       if (progress <= 0.0) return;
