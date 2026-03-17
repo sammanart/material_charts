@@ -377,11 +377,20 @@ class MultiLineChartState extends State<MultiLineChart>
         }
         
         if (shouldAdvance) {
-          if (currentTimeMs >= groupStartTimeMs && currentTimeMs <= groupEndTimeMs) {
-            final lineProgress = (currentTimeMs - groupStartTimeMs) / groupDuration;
-            _lineAnimationProgress[lineIndex] = min(lineProgress, 1.0);
-          } else if (currentTimeMs > groupEndTimeMs) {
-            _lineAnimationProgress[lineIndex] = 1.0;
+          if (trigger == LineAnimationTrigger.manual) {
+            // Manual series: use wall-clock elapsed time since trigger (consistent with manual segments)
+            if (_manualTriggerStartTime.containsKey(order)) {
+              final lineDuration = config?.duration?.inMilliseconds ?? widget.style.defaultAnimationDuration.inMilliseconds;
+              final elapsed = DateTime.now().difference(_manualTriggerStartTime[order]!).inMilliseconds.toDouble();
+              _lineAnimationProgress[lineIndex] = min(elapsed / lineDuration.toDouble(), 1.0);
+            }
+          } else {
+            if (currentTimeMs >= groupStartTimeMs && currentTimeMs <= groupEndTimeMs) {
+              final lineProgress = (currentTimeMs - groupStartTimeMs) / groupDuration;
+              _lineAnimationProgress[lineIndex] = min(lineProgress, 1.0);
+            } else if (currentTimeMs > groupEndTimeMs) {
+              _lineAnimationProgress[lineIndex] = 1.0;
+            }
           }
         }
       }
@@ -469,9 +478,25 @@ class MultiLineChartState extends State<MultiLineChart>
         break;
       }
     }
-    
+
+    // Check if any manual series are still animating
+    bool hasActiveManualSeries = false;
+    for (int i = 0; i < widget.series.length; i++) {
+      final seriesConfig = widget.series[i].animationConfig;
+      final seriesTrigger = seriesConfig?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+      final seriesOrder = seriesConfig?.animationOrder ?? 0;
+      if (seriesTrigger == LineAnimationTrigger.manual &&
+          _manuallyTriggeredOrders.contains(seriesOrder) &&
+          _lineAnimationProgress[i] < 1.0) {
+        hasActiveManualSeries = true;
+        break;
+      }
+    }
+
+    final hasActiveManualAnimations = hasActiveManualSegments || hasActiveManualSeries;
+
     // Manage manual segment ticker
-    if (hasActiveManualSegments && _manualSegmentTicker == null) {
+    if (hasActiveManualAnimations && _manualSegmentTicker == null) {
       // Start ticker for manual segments
       _manualSegmentTicker = createTicker((_) {
         if (mounted) {
@@ -481,7 +506,7 @@ class MultiLineChartState extends State<MultiLineChart>
         }
       });
       _manualSegmentTicker!.start();
-    } else if (!hasActiveManualSegments && _manualSegmentTicker != null) {
+    } else if (!hasActiveManualAnimations && _manualSegmentTicker != null) {
       // Stop ticker if no manual segments are active
       _manualSegmentTicker!.dispose();
       _manualSegmentTicker = null;
@@ -496,8 +521,8 @@ class MultiLineChartState extends State<MultiLineChart>
       }
     }
     
-    // Update UI if animation is in progress or manual segments are active
-    if (mounted && (_controller.isAnimating || hasActiveManualSegments)) {
+    // Update UI if animation is in progress or manual animations are active
+    if (mounted && (_controller.isAnimating || hasActiveManualAnimations)) {
       setState(() {});
     }
   }

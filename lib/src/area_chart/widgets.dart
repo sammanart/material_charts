@@ -338,11 +338,20 @@ class MaterialAreaChartState extends State<MaterialAreaChart> with TickerProvide
         }
 
         if (shouldAdvance) {
-          if (currentTimeMs >= groupStartTimeMs && currentTimeMs <= groupEndTimeMs) {
-            final seriesProgress = (currentTimeMs - groupStartTimeMs) / groupDuration;
-            _seriesAnimationProgress[seriesIndex] = math.min(seriesProgress, 1.0);
-          } else if (currentTimeMs > groupEndTimeMs) {
-            _seriesAnimationProgress[seriesIndex] = 1.0;
+          if (trigger == AreaAnimationTrigger.manual) {
+            // Manual series: use wall-clock elapsed time since trigger (consistent with manual segments)
+            if (_manualTriggerStartTime.containsKey(order)) {
+              final seriesDuration = config?.duration?.inMilliseconds ?? widget.style.animationDuration.inMilliseconds;
+              final elapsed = DateTime.now().difference(_manualTriggerStartTime[order]!).inMilliseconds.toDouble();
+              _seriesAnimationProgress[seriesIndex] = math.min(elapsed / seriesDuration.toDouble(), 1.0);
+            }
+          } else {
+            if (currentTimeMs >= groupStartTimeMs && currentTimeMs <= groupEndTimeMs) {
+              final seriesProgress = (currentTimeMs - groupStartTimeMs) / groupDuration;
+              _seriesAnimationProgress[seriesIndex] = math.min(seriesProgress, 1.0);
+            } else if (currentTimeMs > groupEndTimeMs) {
+              _seriesAnimationProgress[seriesIndex] = 1.0;
+            }
           }
         }
       }
@@ -412,8 +421,24 @@ class MaterialAreaChartState extends State<MaterialAreaChart> with TickerProvide
       }
     }
 
+    // Check if any manual series are still animating
+    bool hasActiveManualSeries = false;
+    for (int i = 0; i < widget.series.length; i++) {
+      final seriesConfig = widget.series[i].animationConfig;
+      final seriesTrigger = seriesConfig?.animationTrigger ?? widget.style.defaultAnimationTrigger;
+      final seriesOrder = seriesConfig?.animationOrder ?? 0;
+      if (seriesTrigger == AreaAnimationTrigger.manual &&
+          _manuallyTriggeredOrders.contains(seriesOrder) &&
+          _seriesAnimationProgress[i] < 1.0) {
+        hasActiveManualSeries = true;
+        break;
+      }
+    }
+
+    final hasActiveManualAnimations = hasActiveManualSegments || hasActiveManualSeries;
+
     // Manage manual segment ticker
-    if (hasActiveManualSegments && _manualSegmentTicker == null) {
+    if (hasActiveManualAnimations && _manualSegmentTicker == null) {
       _manualSegmentTicker = createTicker((_) {
         if (mounted) {
           setState(() {
@@ -422,7 +447,7 @@ class MaterialAreaChartState extends State<MaterialAreaChart> with TickerProvide
         }
       });
       _manualSegmentTicker!.start();
-    } else if (!hasActiveManualSegments && _manualSegmentTicker != null) {
+    } else if (!hasActiveManualAnimations && _manualSegmentTicker != null) {
       _manualSegmentTicker!.dispose();
       _manualSegmentTicker = null;
       // Force a final repaint to show the completed animation even if focus is elsewhere
@@ -436,8 +461,8 @@ class MaterialAreaChartState extends State<MaterialAreaChart> with TickerProvide
       }
     }
 
-    // Update UI if animation is in progress or manual segments are active
-    if (mounted && (_controller.isAnimating || hasActiveManualSegments)) {
+    // Update UI if animation is in progress or manual animations are active
+    if (mounted && (_controller.isAnimating || hasActiveManualAnimations)) {
       setState(() {});
     }
   }
