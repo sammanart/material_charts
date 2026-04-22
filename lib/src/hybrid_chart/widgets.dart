@@ -201,11 +201,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
     for (int i = 0; i < widget.series.length; i++) {
       final config = widget.series[i].animationConfig;
       final order = config?.animationOrder ?? 0;
-
-      if (!seriesByOrder.containsKey(order)) {
-        seriesByOrder[order] = [];
-      }
-      seriesByOrder[order]!.add(i);
+      seriesByOrder.putIfAbsent(order, () => <int>[]).add(i);
     }
 
     final sortedOrders = seriesByOrder.keys.toList()..sort();
@@ -235,37 +231,25 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
         final duration = config?.duration?.inMilliseconds ?? widget.style.animationDuration.inMilliseconds;
 
         if (trigger == AreaAnimationTrigger.manual) {
-          // For manual triggers, use elapsed time since trigger was called
           if (!_manuallyTriggeredOrders.contains(order)) {
-            _seriesAnimationProgress[seriesIndex] = 0.0; // Not triggered yet
+            _seriesAnimationProgress[seriesIndex] = 0.0;
           } else if (_manualTriggerStartTime.containsKey(order)) {
             final elapsed = DateTime.now().difference(_manualTriggerStartTime[order]!).inMilliseconds.toDouble();
             if (_reverseAnimatingOrders.contains(order)) {
-              // Reverse animation: start from 1.0 and go to 0.0
-              if (elapsed <= duration) {
-                _seriesAnimationProgress[seriesIndex] = (1.0 - (elapsed / duration)).clamp(0.0, 1.0);
-              } else {
-                _seriesAnimationProgress[seriesIndex] = 0.0;
-              }
+              _seriesAnimationProgress[seriesIndex] = elapsed <= duration ? (1.0 - (elapsed / duration)).clamp(0.0, 1.0) : 0.0;
             } else {
-              // Forward animation: start from 0.0 and go to 1.0
-              if (elapsed <= duration) {
-                _seriesAnimationProgress[seriesIndex] = (elapsed / duration).clamp(0.0, 1.0);
-              } else {
-                _seriesAnimationProgress[seriesIndex] = 1.0;
-              }
+              _seriesAnimationProgress[seriesIndex] = elapsed <= duration ? (elapsed / duration).clamp(0.0, 1.0) : 1.0;
             }
           } else {
             _seriesAnimationProgress[seriesIndex] = 0.0;
           }
+        } else if (currentTimeMs >= groupStartTimeMs && currentTimeMs <= groupEndTimeMs) {
+          final seriesProgress = (currentTimeMs - groupStartTimeMs) / groupDuration;
+          _seriesAnimationProgress[seriesIndex] = seriesProgress.clamp(0.0, 1.0);
+        } else if (currentTimeMs > groupEndTimeMs) {
+          _seriesAnimationProgress[seriesIndex] = 1.0;
         } else {
-          // For automatic triggers, use main controller time
-          if (currentTimeMs >= groupStartTimeMs && currentTimeMs <= groupEndTimeMs) {
-            final seriesProgress = (currentTimeMs - groupStartTimeMs) / groupDuration;
-            _seriesAnimationProgress[seriesIndex] = seriesProgress.clamp(0.0, 1.0);
-          } else if (currentTimeMs > groupEndTimeMs) {
-            _seriesAnimationProgress[seriesIndex] = 1.0;
-          }
+          _seriesAnimationProgress[seriesIndex] = 0.0;
         }
       }
 
@@ -289,19 +273,9 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
           } else if (_manualTriggerStartTime.containsKey(segmentOrder)) {
             final elapsed = DateTime.now().difference(_manualTriggerStartTime[segmentOrder]!).inMilliseconds.toDouble();
             if (_reverseAnimatingOrders.contains(segmentOrder)) {
-              // Reverse animation: start from 1.0 and go to 0.0
-              if (elapsed <= duration) {
-                _segmentAnimationProgress[segmentOrder] = (1.0 - (elapsed / duration)).clamp(0.0, 1.0);
-              } else {
-                _segmentAnimationProgress[segmentOrder] = 0.0;
-              }
+              _segmentAnimationProgress[segmentOrder] = elapsed <= duration ? (1.0 - (elapsed / duration)).clamp(0.0, 1.0) : 0.0;
             } else {
-              // Forward animation: start from 0.0 and go to 1.0
-              if (elapsed <= duration) {
-                _segmentAnimationProgress[segmentOrder] = (elapsed / duration).clamp(0.0, 1.0);
-              } else {
-                _segmentAnimationProgress[segmentOrder] = 1.0;
-              }
+              _segmentAnimationProgress[segmentOrder] = elapsed <= duration ? (elapsed / duration).clamp(0.0, 1.0) : 1.0;
             }
           } else {
             _segmentAnimationProgress[segmentOrder] = 0.0;
@@ -332,14 +306,12 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
 
     bool hasActiveManualSegments = false;
     for (final segmentOrder in _manuallyTriggeredOrders) {
-        if (_reverseAnimatingOrders.contains(segmentOrder) ||
-          (_segmentAnimationProgress[segmentOrder] != null && _segmentAnimationProgress[segmentOrder]! < 1.0)) {
+      if (_reverseAnimatingOrders.contains(segmentOrder) || (_segmentAnimationProgress[segmentOrder] != null && _segmentAnimationProgress[segmentOrder]! < 1.0)) {
         hasActiveManualSegments = true;
         break;
       }
     }
 
-    // Also check for active manual series animations
     bool hasActiveManualSeries = false;
     for (final seriesOrder in _manuallyTriggeredOrders) {
       if (_seriesAnimationProgress.isNotEmpty) {
@@ -351,11 +323,11 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
             break;
           }
         }
-        if (hasActiveManualSeries) break;
       }
+      if (hasActiveManualSeries) break;
     }
 
-    bool hasActiveManualAnimations = hasActiveManualSegments || hasActiveManualSeries;
+    final hasActiveManualAnimations = hasActiveManualSegments || hasActiveManualSeries;
 
     if (hasActiveManualAnimations && _manualSegmentTicker == null) {
       _manualSegmentTicker = createTicker((_) {
@@ -395,7 +367,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
 
   /// Start reversing an animation that is currently playing forward.
   /// The animation will play backwards at the same speed.
-  /// 
+  ///
   /// Example usage:
   /// ```dart
   /// final globalKey = GlobalKey<MaterialHybridChartState>();
@@ -417,7 +389,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
 
   /// Reset an animation to its starting state (progress = 0.0).
   /// This stops any ongoing animation and clears the triggered state.
-  /// 
+  ///
   /// Example usage:
   /// ```dart
   /// final globalKey = GlobalKey<MaterialHybridChartState>();
@@ -457,15 +429,9 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
   }
 
   @override
-  void didUpdateWidget(covariant MaterialHybridChart oldWidget) {
+  void didUpdateWidget(MaterialHybridChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final shouldResetAnimation = oldWidget.style.animationDuration != widget.style.animationDuration ||
-        oldWidget.style.animationCurve != widget.style.animationCurve ||
-        oldWidget.style.defaultAnimationTrigger != widget.style.defaultAnimationTrigger ||
-        oldWidget.style.defaultDelayBeforeNext != widget.style.defaultDelayBeforeNext ||
-        oldWidget.style.defaultSegmentAnimationDuration != widget.style.defaultSegmentAnimationDuration ||
-        oldWidget.style.segmentAnimationConfigs != widget.style.segmentAnimationConfigs ||
-        _didSeriesAnimationConfigChange(oldWidget.series, widget.series);
+    final shouldResetAnimation = oldWidget.style.animationDuration != widget.style.animationDuration || oldWidget.style.animationCurve != widget.style.animationCurve || oldWidget.style.defaultAnimationTrigger != widget.style.defaultAnimationTrigger || oldWidget.style.defaultDelayBeforeNext != widget.style.defaultDelayBeforeNext || oldWidget.style.defaultSegmentAnimationDuration != widget.style.defaultSegmentAnimationDuration || oldWidget.style.segmentAnimationConfigs != widget.style.segmentAnimationConfigs || _didSeriesAnimationConfigChange(oldWidget.series, widget.series);
 
     if (shouldResetAnimation) {
       _controller.duration = _calculateTotalAnimationDuration();
@@ -487,18 +453,15 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
       final oldConfig = oldSeries[i].animationConfig;
       final newConfig = newSeries[i].animationConfig;
 
-      if (oldConfig?.animationOrder != newConfig?.animationOrder ||
-          oldConfig?.animationType != newConfig?.animationType ||
-          oldConfig?.animationTrigger != newConfig?.animationTrigger ||
-          oldConfig?.duration != newConfig?.duration ||
-          oldConfig?.delayBeforeNext != newConfig?.delayBeforeNext ||
-          oldConfig?.curve != newConfig?.curve) {
+      if (oldConfig?.animationOrder != newConfig?.animationOrder || oldConfig?.animationType != newConfig?.animationType || oldConfig?.animationTrigger != newConfig?.animationTrigger || oldConfig?.duration != newConfig?.duration || oldConfig?.delayBeforeNext != newConfig?.delayBeforeNext || oldConfig?.curve != newConfig?.curve) {
         return true;
       }
     }
 
     return false;
   }
+
+  bool get _usesStackedArea => _currentChartType == HybridChartType.area && widget.style.stacked;
 
   void _handlePanUpdate(DragUpdateDetails details) {
     if (_activeDragPoint != null) return;
@@ -636,14 +599,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
   /// Calculate Y pixel position from a value, accounting for chart type and offset settings
   double _valueToYPixel(double value, Rect chartArea, HybridChartSeries seriesData) {
     if (_currentChartType == HybridChartType.area || _currentChartType == HybridChartType.multiLine || _currentChartType == HybridChartType.line) {
-      // Area chart scaling
-      final allValues = widget.series.expand((s) => s.dataPoints.map((d) => d.value));
-      final maxOffset = widget.style.yAxisMaxOffset < 0 ? 0.0 : widget.style.yAxisMaxOffset;
-      final maxValue = allValues.reduce((a, b) => a > b ? a : b) + maxOffset;
-      final minValue = widget.style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
-      final valueRange = maxValue - minValue;
-      final normalizedValue = (value - minValue) / valueRange;
-      return chartArea.bottom - (normalizedValue * chartArea.height);
+      return _mapAreaValueToY(chartArea, value);
     } else {
       // Candlestick scaling
       // Use `close` as fallback when high/low are nullable in models.
@@ -656,7 +612,7 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
     }
   }
 
-  double _yPixelToValue(double y, Rect chartArea, HybridChartSeries seriesData) {
+  double _yPixelToValue(double y, Rect chartArea, HybridChartSeries seriesData, {int? seriesIndex, int? pointIndex}) {
     double minValue;
     double maxValue;
 
@@ -667,10 +623,8 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
       final maxOffset = widget.style.yAxisMaxOffset < 0 ? 0.0 : widget.style.yAxisMaxOffset;
       maxValue = high + maxOffset;
     } else {
-      final allValues = widget.series.expand((s) => s.dataPoints.map((d) => d.value));
-      final maxOffset = widget.style.yAxisMaxOffset < 0 ? 0.0 : widget.style.yAxisMaxOffset;
-      maxValue = allValues.reduce((a, b) => a > b ? a : b) + maxOffset;
-      minValue = widget.style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
+      maxValue = _getAreaMaxValue();
+      minValue = _getAreaMinValue();
     }
 
     final valueRange = maxValue - minValue;
@@ -678,7 +632,13 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
 
     final clampedY = y.clamp(chartArea.top, chartArea.bottom);
     final normalized = ((chartArea.bottom - clampedY) / chartArea.height).clamp(0.0, 1.0);
-    return minValue + (normalized * valueRange);
+    final mappedValue = minValue + (normalized * valueRange);
+
+    if (_usesStackedArea && seriesIndex != null && pointIndex != null) {
+      return mappedValue - _getStackedValue(seriesIndex + 1, pointIndex);
+    }
+
+    return mappedValue;
   }
 
   double _getCandleX(int index, Rect chartArea, int dataPointCount) {
@@ -701,24 +661,82 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
   List<Offset> _getAreaChartPoints(Rect chartArea, HybridChartSeries seriesData) {
     final dataPoints = seriesData.dataPoints;
     if (dataPoints.isEmpty) return [];
+    final seriesIndex = widget.series.indexOf(seriesData);
+    if (seriesIndex == -1) return [];
 
-    // Calculate min and max values using the 'open' field (displayed as value for area chart)
-    final allValues = widget.series.expand((s) => s.dataPoints.map((d) => d.value));
-    final maxOffset = widget.style.yAxisMaxOffset < 0 ? 0.0 : widget.style.yAxisMaxOffset;
-    final maxValue = allValues.reduce((a, b) => a > b ? a : b) + maxOffset;
-    final minValue = widget.style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
-    final valueRange = maxValue - minValue;
-
-    // Use xSpanSlots if defined to spread points across total slots
-    final slots = widget.style.xSpanSlots ?? dataPoints.length;
-    final count = dataPoints.length < slots ? dataPoints.length : slots;
+    final count = _getRenderedPointCount(seriesData);
 
     return List.generate(count, (i) {
       final x = _getXCoordinate(chartArea, i, dataPoints.length);
-      final normalizedValue = (dataPoints[i].value - minValue) / valueRange;
-      final y = chartArea.bottom - (normalizedValue * chartArea.height);
+      final value = _usesStackedArea ? _getStackedValue(seriesIndex, i) : dataPoints[i].value;
+      final y = _mapAreaValueToY(chartArea, value);
       return Offset(x, y);
     });
+  }
+
+  int _getRenderedPointCount(HybridChartSeries seriesData) {
+    final slots = widget.style.xSpanSlots;
+    return slots == null ? seriesData.dataPoints.length : min(seriesData.dataPoints.length, slots);
+  }
+
+  double _getStackedValue(int startSeriesIndex, int pointIndex) {
+    double total = 0.0;
+    for (int i = startSeriesIndex; i < widget.series.length; i++) {
+      final seriesData = widget.series[i];
+      if (pointIndex < _getRenderedPointCount(seriesData)) {
+        total += seriesData.dataPoints[pointIndex].value;
+      }
+    }
+    return total;
+  }
+
+  List<double> _collectAreaVisibleValues() {
+    if (!_usesStackedArea) {
+      return widget.series.expand((seriesData) {
+        final count = _getRenderedPointCount(seriesData);
+        return seriesData.dataPoints.take(count).map((point) => point.value);
+      }).toList();
+    }
+
+    final values = <double>[0.0];
+    final maxCount = widget.series.fold<int>(0, (currentMax, seriesData) => max(currentMax, _getRenderedPointCount(seriesData)));
+
+    for (int pointIndex = 0; pointIndex < maxCount; pointIndex++) {
+      double cumulative = 0.0;
+      values.add(cumulative);
+      for (int seriesIndex = widget.series.length - 1; seriesIndex >= 0; seriesIndex--) {
+        final seriesData = widget.series[seriesIndex];
+        if (pointIndex < _getRenderedPointCount(seriesData)) {
+          cumulative += seriesData.dataPoints[pointIndex].value;
+          values.add(cumulative);
+        }
+      }
+    }
+
+    return values;
+  }
+
+  double _getAreaMinValue() {
+    if (widget.style.forceYAxisFromZero) return 0.0;
+    final values = _collectAreaVisibleValues();
+    return values.isEmpty ? 0.0 : values.reduce(min);
+  }
+
+  double _getAreaMaxValue() {
+    final values = _collectAreaVisibleValues();
+    final maxOffset = widget.style.yAxisMaxOffset < 0 ? 0.0 : widget.style.yAxisMaxOffset;
+    return (values.isEmpty ? 0.0 : values.reduce(max)) + maxOffset;
+  }
+
+  double _mapAreaValueToY(Rect chartArea, double value) {
+    final maxValue = _getAreaMaxValue();
+    final minValue = _getAreaMinValue();
+    final valueRange = maxValue - minValue;
+    if (valueRange == 0) {
+      return chartArea.top + chartArea.height / 2;
+    }
+    final normalizedValue = (value - minValue) / valueRange;
+    return chartArea.bottom - (normalizedValue * chartArea.height);
   }
 
   double _getXCoordinate(Rect chartArea, int index, int totalPoints) {
@@ -823,7 +841,13 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
     if (active == null) return;
 
     final seriesData = widget.series[active.seriesIndex];
-    final newValue = _yPixelToValue(position.dy, chartArea, seriesData);
+    final newValue = _yPixelToValue(
+      position.dy,
+      chartArea,
+      seriesData,
+      seriesIndex: active.seriesIndex,
+      pointIndex: active.pointIndex,
+    );
     _lastDragValue = newValue;
 
     if (widget.showDragTooltip) {
@@ -916,7 +940,8 @@ class _MaterialHybridChartState extends State<MaterialHybridChart> with TickerPr
       y = _valueToYPixel(newValue, chartArea, seriesData);
     } else {
       x = _getXCoordinate(chartArea, active.pointIndex, seriesData.dataPoints.length);
-      y = _valueToYPixel(newValue, chartArea, seriesData);
+      final displayValue = _usesStackedArea ? newValue + _getStackedValue(active.seriesIndex + 1, active.pointIndex) : newValue;
+      y = _valueToYPixel(displayValue, chartArea, seriesData);
     }
 
     setState(() {

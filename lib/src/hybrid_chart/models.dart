@@ -268,6 +268,7 @@ class HybridChartStyle {
   final bool showPoints;
   final double areaFillOpacityTop;
   final double areaFillOpacityBottom;
+  final bool stacked;
   final bool forceYAxisFromZero;
   final double yAxisMaxOffset;
   final int? xSpanSlots; // Total slots across X axis; spreads points across this span
@@ -370,6 +371,7 @@ class HybridChartStyle {
     this.showPoints = true,
     this.areaFillOpacityTop = 0.3,
     this.areaFillOpacityBottom = 0.05,
+    this.stacked = false,
     this.forceYAxisFromZero = true,
     this.yAxisMaxOffset = 0.0,
     this.xSpanSlots,
@@ -443,6 +445,7 @@ class HybridChartStyle {
     bool? showPoints,
     double? areaFillOpacityTop,
     double? areaFillOpacityBottom,
+    bool? stacked,
     bool? forceYAxisFromZero,
     double? yAxisMaxOffset,
     int? xSpanSlots,
@@ -513,6 +516,7 @@ class HybridChartStyle {
       showPoints: showPoints ?? true,
       areaFillOpacityTop: areaFillOpacityTop ?? 0.3,
       areaFillOpacityBottom: areaFillOpacityBottom ?? 0.05,
+      stacked: stacked ?? false,
       forceYAxisFromZero: forceYAxisFromZero ?? true,
       yAxisMaxOffset: yAxisMaxOffset ?? 0.0,
       xSpanSlots: xSpanSlots,

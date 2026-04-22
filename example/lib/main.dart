@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -6,7 +6,6 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:material_charts/material_charts.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -87,13 +86,16 @@ Widget _buildExportHeader(BuildContext context, String title, GlobalKey repaintK
   );
 }
 
-Future<File> _saveSvgToDocuments(String svg, {String? fileName}) async {
-  final dir = await getApplicationDocumentsDirectory();
-  final timestamp = DateTime.now().millisecondsSinceEpoch;
-  final safeName = fileName ?? 'chart_$timestamp.svg';
-  final file = File('${dir.path}/$safeName');
-  await file.writeAsString(svg);
-  return file;
+String _buildSvgFileName(String prefix) {
+  return '${prefix}_${DateTime.now().millisecondsSinceEpoch}.svg';
+}
+
+XFile _createSvgXFile(String svg, String fileName) {
+  return XFile.fromData(
+    Uint8List.fromList(utf8.encode(svg)),
+    mimeType: 'image/svg+xml',
+    name: fileName,
+  );
 }
 
 // Generic export functions for different chart types
@@ -119,10 +121,10 @@ Future<void> _exportBarChartSvg(
       ),
     );
 
-    final file = await _saveSvgToDocuments(svg, fileName: 'bar_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    final fileName = _buildSvgFileName('bar_chart');
     if (!context.mounted) return;
 
-    await _showSvgPreviewDialog(context, svg, file);
+    await _showSvgPreviewDialog(context, svg, fileName: fileName, shareText: title);
   } catch (e) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -154,10 +156,10 @@ Future<void> _exportPieChartSvg(
       ),
     );
 
-    final file = await _saveSvgToDocuments(svg, fileName: 'pie_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    final fileName = _buildSvgFileName('pie_chart');
     if (!context.mounted) return;
 
-    await _showSvgPreviewDialog(context, svg, file);
+    await _showSvgPreviewDialog(context, svg, fileName: fileName, shareText: title);
   } catch (e) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -184,10 +186,10 @@ Future<void> _exportPopulationPyramidSvg(
       ),
     );
 
-    final file = await _saveSvgToDocuments(svg, fileName: 'population_pyramid_${DateTime.now().millisecondsSinceEpoch}.svg');
+    final fileName = _buildSvgFileName('population_pyramid');
     if (!context.mounted) return;
 
-    await _showSvgPreviewDialog(context, svg, file);
+    await _showSvgPreviewDialog(context, svg, fileName: fileName, shareText: title);
   } catch (e) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -263,10 +265,10 @@ Future<void> _exportLineChartSvg(
       ),
     );
 
-    final file = await _saveSvgToDocuments(svg, fileName: 'line_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    final fileName = _buildSvgFileName('line_chart');
     if (!context.mounted) return;
 
-    await _showSvgPreviewDialog(context, svg, file);
+    await _showSvgPreviewDialog(context, svg, fileName: fileName, shareText: title);
   } catch (e) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -296,10 +298,10 @@ Future<void> _exportAreaChartSvg(
       ),
     );
 
-    final file = await _saveSvgToDocuments(svg, fileName: 'area_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    final fileName = _buildSvgFileName('area_chart');
     if (!context.mounted) return;
 
-    await _showSvgPreviewDialog(context, svg, file);
+    await _showSvgPreviewDialog(context, svg, fileName: fileName, shareText: title);
   } catch (e) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -329,10 +331,10 @@ Future<void> _exportMultiLineChartSvg(
       ),
     );
 
-    final file = await _saveSvgToDocuments(svg, fileName: 'multi_line_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    final fileName = _buildSvgFileName('multi_line_chart');
     if (!context.mounted) return;
 
-    await _showSvgPreviewDialog(context, svg, file);
+    await _showSvgPreviewDialog(context, svg, fileName: fileName, shareText: title);
   } catch (e) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -363,10 +365,10 @@ Future<void> _exportStackedBarChartSvg(
       ),
     );
 
-    final file = await _saveSvgToDocuments(svg, fileName: 'stacked_bar_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+    final fileName = _buildSvgFileName('stacked_bar_chart');
     if (!context.mounted) return;
 
-    await _showSvgPreviewDialog(context, svg, file);
+    await _showSvgPreviewDialog(context, svg, fileName: fileName, shareText: title);
   } catch (e) {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -375,7 +377,12 @@ Future<void> _exportStackedBarChartSvg(
   }
 }
 
-Future<void> _showSvgPreviewDialog(BuildContext context, String svg, File file) async {
+Future<void> _showSvgPreviewDialog(
+  BuildContext context,
+  String svg, {
+  required String fileName,
+  String? shareText,
+}) async {
   await showDialog<void>(
     context: context,
     builder: (dialogContext) {
@@ -400,7 +407,7 @@ Future<void> _showSvgPreviewDialog(BuildContext context, String svg, File file) 
                 SizedBox(
                   width: double.infinity,
                   child: Text(
-                    file.path,
+                    fileName,
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
@@ -425,7 +432,11 @@ Future<void> _showSvgPreviewDialog(BuildContext context, String svg, File file) 
           ),
           TextButton(
             onPressed: () async {
-              await Share.shareXFiles([XFile(file.path)], text: 'Hybrid chart SVG');
+              await Share.shareXFiles(
+                [_createSvgXFile(svg, fileName)],
+                fileNameOverrides: [fileName],
+                text: shareText ?? 'Chart SVG',
+              );
             },
             child: const Text('Share'),
           ),
@@ -476,6 +487,7 @@ class _ChartsDemoState extends State<ChartsDemo> {
     PieChartAnimationExample(),
     PopulationChartExample(),
     AreaChartExample(),
+    StackedAreaChartExample(),
     AnimatedAreaChartExample(),
     AnimatedAreaSegmentChartExample(),
     AnimatedAreaManualTriggerExample(),
@@ -492,6 +504,7 @@ class _ChartsDemoState extends State<ChartsDemo> {
     const CandlestickChartExample(),
     const HybridChartAnimationExample(),
     const HybridChartMixedAnimationsExample(),
+    HybridStackedAreaChartExample(),
     const HybridChartExample(),
   ];
 
@@ -506,6 +519,7 @@ class _ChartsDemoState extends State<ChartsDemo> {
     'Pie Chart Animated',
     'Population Chart',
     'Area Chart',
+    'Stacked Area Chart',
     'Animated Area Chart',
     'Animated Area (Segments)',
     'Area Chart: Manual Triggers',
@@ -522,6 +536,7 @@ class _ChartsDemoState extends State<ChartsDemo> {
     'Candlestick Chart',
     'Hybrid Chart: Animation Examples',
     'Hybrid Chart: Mixed Manual Animations',
+    'Hybrid Chart: Stacked Area',
     'Hybrid Chart (Area/Candlestick)',
   ];
 
@@ -1542,6 +1557,104 @@ class AreaChartExample extends StatelessWidget {
             series: series,
             width: 350,
             height: 250,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class StackedAreaChartExample extends StatelessWidget {
+  StackedAreaChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    final series = [
+      AreaChartSeries(
+        name: 'North America',
+        dataPoints: const [
+          AreaChartData(value: 26, label: 'Jan'),
+          AreaChartData(value: 22, label: 'Feb'),
+          AreaChartData(value: 24, label: 'Mar'),
+          AreaChartData(value: 35, label: 'Apr'),
+          AreaChartData(value: 31, label: 'May'),
+          AreaChartData(value: 27, label: 'Jun'),
+        ],
+        color: const Color(0xFF4A90D9),
+      ),
+      AreaChartSeries(
+        name: 'Europe',
+        dataPoints: const [
+          AreaChartData(value: 18, label: 'Jan'),
+          AreaChartData(value: 15, label: 'Feb'),
+          AreaChartData(value: 17, label: 'Mar'),
+          AreaChartData(value: 20, label: 'Apr'),
+          AreaChartData(value: 16, label: 'May'),
+          AreaChartData(value: 19, label: 'Jun'),
+        ],
+        color: const Color(0xFFFF8C2A),
+      ),
+      AreaChartSeries(
+        name: 'Asia Pacific',
+        dataPoints: const [
+          AreaChartData(value: 7, label: 'Jan'),
+          AreaChartData(value: 6, label: 'Feb'),
+          AreaChartData(value: 7, label: 'Mar'),
+          AreaChartData(value: 8, label: 'Apr'),
+          AreaChartData(value: 7, label: 'May'),
+          AreaChartData(value: 6, label: 'Jun'),
+        ],
+        color: const Color(0xFFFFD05A),
+      ),
+      AreaChartSeries(
+        name: 'Other Markets',
+        dataPoints: const [
+          AreaChartData(value: 3, label: 'Jan'),
+          AreaChartData(value: 2, label: 'Feb'),
+          AreaChartData(value: 2, label: 'Mar'),
+          AreaChartData(value: 4, label: 'Apr'),
+          AreaChartData(value: 3, label: 'May'),
+          AreaChartData(value: 3, label: 'Jun'),
+        ],
+        color: const Color(0xFF7C8A93),
+      ),
+    ];
+
+    const style = AreaChartStyle(
+      colors: [
+        Color(0xFF4A90D9),
+        Color(0xFFFF8C2A),
+        Color(0xFFFFD05A),
+        Color(0xFF7C8A93),
+      ],
+      showPoints: false,
+      showGrid: true,
+      forceYAxisFromZero: true,
+      stacked: true,
+      horizontalGridLines: 4,
+      xSpanSlots: 6,
+      areaFillOpacityTop: 0.75,
+      areaFillOpacityBottom: 0.2,
+    );
+
+    return Column(
+      children: [
+        _buildExportHeader(
+          context,
+          'Stacked Area Chart - Regional Mix',
+          _chartKey,
+          onExportSvg: () => _exportAreaChartSvg(context, series, style, 'Stacked Area Chart - Regional Mix'),
+        ),
+        const SizedBox(height: 20),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialAreaChart(
+            series: series,
+            width: 350,
+            height: 250,
+            style: style,
           ),
         ),
       ],
@@ -3884,6 +3997,179 @@ class HybridChartExample extends StatefulWidget {
   State<HybridChartExample> createState() => _HybridChartExampleState();
 }
 
+class HybridStackedAreaChartExample extends StatelessWidget {
+  HybridStackedAreaChartExample({super.key});
+
+  final GlobalKey _chartKey = GlobalKey();
+
+  Future<void> _exportSvg(
+    BuildContext context,
+    HybridChartStyle style,
+    HybridChartAxisConfig axisConfig,
+    List<HybridChartSeries> series,
+    String title,
+  ) async {
+    try {
+      final exporter = HybridChartSvgExporter();
+      final svg = exporter.exportSvg(
+        size: const Size(700, 360),
+        series: series,
+        style: style,
+        axisConfig: axisConfig,
+        chartType: HybridChartType.area,
+        options: HybridChartSvgOptions(
+          includeAxes: true,
+          includeAxisLabels: true,
+          includeGrid: true,
+          includeTitle: true,
+          includeLegend: true,
+          includeVolume: false,
+          includeKeyEvents: true,
+          title: title,
+        ),
+      );
+
+      final fileName = _buildSvgFileName('hybrid_stacked_area_chart');
+      if (!context.mounted) return;
+
+      await _showSvgPreviewDialog(context, svg, fileName: fileName, shareText: title);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('SVG export failed: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const chartTitle = 'Hybrid Chart - Stacked Area';
+
+    final series = [
+      HybridChartSeries(
+        name: 'North America',
+        color: const Color(0xFF2E6F95),
+        dataPoints: const [
+          HybridChartData(label: 'Jan', close: 24),
+          HybridChartData(label: 'Feb', close: 22),
+          HybridChartData(label: 'Mar', close: 26),
+          HybridChartData(label: 'Apr', close: 29),
+          HybridChartData(label: 'May', close: 31),
+          HybridChartData(label: 'Jun', close: 28, keyEvent: KeyEventData(htmlContent: '<b>North America</b><br/>Seasonal peak demand', markerColor: Color(0xFF2E6F95))),
+        ],
+      ),
+      HybridChartSeries(
+        name: 'Europe',
+        color: const Color(0xFFF18F01),
+        dataPoints: const [
+          HybridChartData(label: 'Jan', close: 16),
+          HybridChartData(label: 'Feb', close: 15),
+          HybridChartData(label: 'Mar', close: 17),
+          HybridChartData(label: 'Apr', close: 19),
+          HybridChartData(label: 'May', close: 18),
+          HybridChartData(label: 'Jun', close: 20),
+        ],
+      ),
+      HybridChartSeries(
+        name: 'Asia Pacific',
+        color: const Color(0xFFA23B72),
+        dataPoints: const [
+          HybridChartData(label: 'Jan', close: 11),
+          HybridChartData(label: 'Feb', close: 10),
+          HybridChartData(label: 'Mar', close: 12),
+          HybridChartData(label: 'Apr', close: 14),
+          HybridChartData(label: 'May', close: 13),
+          HybridChartData(label: 'Jun', close: 15, keyEvent: KeyEventData(htmlContent: '<b>APAC expansion</b><br/>New channel launch', markerColor: Color(0xFFA23B72))),
+        ],
+      ),
+      HybridChartSeries(
+        name: 'Other Markets',
+        color: const Color(0xFF5B8E7D),
+        dataPoints: const [
+          HybridChartData(label: 'Jan', close: 4),
+          HybridChartData(label: 'Feb', close: 4),
+          HybridChartData(label: 'Mar', close: 5),
+          HybridChartData(label: 'Apr', close: 5),
+          HybridChartData(label: 'May', close: 6),
+          HybridChartData(label: 'Jun', close: 6),
+        ],
+      ),
+    ];
+
+    const axisConfig = HybridChartAxisConfig(
+      yAxisPosition: YAxisPosition.right,
+      xAxisPosition: XAxisPosition.bottom,
+      yAxisWidth: 52,
+      xAxisHeight: 28,
+    );
+
+    const style = HybridChartStyle(
+      colors: [
+        Color(0xFF2E6F95),
+        Color(0xFFF18F01),
+        Color(0xFFA23B72),
+        Color(0xFF5B8E7D),
+      ],
+      stacked: true,
+      showGrid: true,
+      showPoints: false,
+      forceYAxisFromZero: true,
+      showKeyEventMarkers: true,
+      autoHorizontalGridLines: 4,
+      autoVerticalGridLines: 5,
+      xSpanSlots: 6,
+      defaultLineWidth: 2,
+      areaFillOpacityTop: 0.72,
+      areaFillOpacityBottom: 0.18,
+      yAxisMaxOffset: 8,
+      padding: EdgeInsets.fromLTRB(14, 24, 58, 22),
+      keyEventMarkerConfig: KeyEventMarkerConfig(
+        verticalOffset: 18,
+        size: 10,
+        minHoverRadius: 14,
+      ),
+      crosshair: AreaCrosshairConfig(
+        enabled: true,
+        showLabel: true,
+        lineColor: Colors.grey,
+        lineWidth: 1,
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildExportHeader(
+          context,
+          chartTitle,
+          _chartKey,
+          onExportSvg: () => _exportSvg(context, style, axisConfig, series, chartTitle),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Area mode only. This shows the new stacked behavior in the hybrid chart without changing the default hybrid demo.',
+          style: TextStyle(fontSize: 13, color: Colors.grey),
+        ),
+        const SizedBox(height: 12),
+        RepaintBoundary(
+          key: _chartKey,
+          child: MaterialHybridChart(
+            series: series,
+            width: 700,
+            height: 360,
+            initialChartType: HybridChartType.area,
+            showChartTypeToggle: false,
+            showGrid: true,
+            axisConfig: axisConfig,
+            style: style,
+            showPointTooltipOnHover: true,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _HybridChartExampleState extends State<HybridChartExample> {
   HybridChartType _chartType = HybridChartType.area;
   double _chartWidth = 800;
@@ -4030,10 +4316,10 @@ class _HybridChartExampleState extends State<HybridChartExample> {
         ),
       );
 
-      final file = await _saveSvgToDocuments(svg, fileName: 'hybrid_chart_${DateTime.now().millisecondsSinceEpoch}.svg');
+      final fileName = _buildSvgFileName('hybrid_chart');
       if (!context.mounted) return;
 
-      await _showSvgPreviewDialog(context, svg, file);
+      await _showSvgPreviewDialog(context, svg, fileName: fileName, shareText: title);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

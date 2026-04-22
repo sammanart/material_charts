@@ -469,6 +469,7 @@ class AreaChartStyle {
   final Duration defaultDelayBeforeNext; // Default delay between sequential animations.
   final Map<int, SegmentAnimationConfig> segmentAnimationConfigs; // Per-segment animation configs grouped by segmentAnimationOrder.
   final Duration defaultSegmentAnimationDuration; // Default duration for segment animations.
+  final bool stacked; // Whether to stack each series on top of the next series.
 
   /// Creates an instance of `AreaChartStyle` with default or custom properties.
   const AreaChartStyle({
@@ -501,6 +502,7 @@ class AreaChartStyle {
     this.defaultDelayBeforeNext = const Duration(milliseconds: 100),
     this.segmentAnimationConfigs = const {},
     this.defaultSegmentAnimationDuration = const Duration(milliseconds: 600),
+    this.stacked = false,
   });
 
   /// Creates an `AreaChartStyle` from a Plotly layout object.
@@ -535,6 +537,7 @@ class AreaChartStyle {
       yAxisTitle: yAxisTitle,
       backgroundColor: backgroundColor,
       gridColor: gridColor,
+      stacked: layout['stacked'] == true,
     );
   }
 }

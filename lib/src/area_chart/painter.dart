@@ -36,7 +36,8 @@ class AreaChartPainter extends CustomPainter {
     }
 
     // Render each series in the chart with segment support.
-    for (int i = 0; i < series.length; i++) {
+    final seriesIndices = style.stacked ? List<int>.generate(series.length, (i) => series.length - 1 - i) : List<int>.generate(series.length, (i) => i);
+    for (final i in seriesIndices) {
       final seriesData = series[i];
       // Get the colors for the series (fallback to default style colors if not defined).
       final color = seriesData.color ?? style.colors[i % style.colors.length];
@@ -74,6 +75,7 @@ class AreaChartPainter extends CustomPainter {
             _drawSegmentGroup(
               canvas,
               chartArea,
+              i,
               seriesData,
               indices,
               color,
@@ -89,6 +91,7 @@ class AreaChartPainter extends CustomPainter {
             _drawSegmentGroup(
               canvas,
               chartArea,
+              i,
               seriesData,
               indices,
               color,
@@ -131,6 +134,7 @@ class AreaChartPainter extends CustomPainter {
   void _drawSegmentGroup(
     Canvas canvas,
     Rect chartArea,
+    int seriesIndex,
     AreaChartSeries seriesData,
     List<int> indices,
     Color color,
@@ -140,7 +144,7 @@ class AreaChartPainter extends CustomPainter {
     int segmentOrder, {
     bool useSeriesAnimation = false,
   }) {
-    final points = _getSeriesPoints(chartArea, seriesData);
+    final points = _getSeriesPoints(chartArea, seriesData, seriesIndex: seriesIndex);
     if (points.isEmpty || indices.isEmpty) return;
 
     // Get start and end indices for this segment
@@ -159,6 +163,7 @@ class AreaChartPainter extends CustomPainter {
     if (startIdx >= points.length || endIdx >= points.length || startIdx > endIdx) return;
 
     final segmentPoints = points.sublist(startIdx, endIdx + 1);
+    final lowerBoundaryPoints = style.stacked ? _getSeriesLowerBoundaryPoints(chartArea, seriesIndex).sublist(startIdx, endIdx + 1) : null;
 
     if (segmentPoints.length < 2) return;
 
@@ -206,7 +211,7 @@ class AreaChartPainter extends CustomPainter {
     }
 
     // Draw the area
-    _drawSegmentArea(canvas, chartArea, segmentPoints, topFill, bottomFill, progress, opacity, shouldDrawProgressively);
+    _drawSegmentArea(canvas, chartArea, segmentPoints, lowerBoundaryPoints, topFill, bottomFill, progress, opacity, shouldDrawProgressively);
 
     // Draw the line
     _drawSegmentLine(canvas, segmentPoints, seriesData, color, progress, opacity, shouldDrawProgressively);
@@ -224,6 +229,7 @@ class AreaChartPainter extends CustomPainter {
     Canvas canvas,
     Rect chartArea,
     List<Offset> segmentPoints,
+    List<Offset>? lowerBoundaryPoints,
     Color topFill,
     Color bottomFill,
     double progress,
@@ -235,14 +241,23 @@ class AreaChartPainter extends CustomPainter {
 
     // Create a path that represents the area below the line.
     final path = Path();
-    path.moveTo(segmentPoints.first.dx, chartArea.bottom);
+    final lowerPoints = lowerBoundaryPoints;
+    final startY = lowerPoints?.first.dy ?? chartArea.bottom;
+    final endY = lowerPoints?.last.dy ?? chartArea.bottom;
+
+    path.moveTo(segmentPoints.first.dx, startY);
     path.lineTo(segmentPoints.first.dx, segmentPoints.first.dy);
 
     for (int i = 1; i < segmentPoints.length; i++) {
       path.lineTo(segmentPoints[i].dx, segmentPoints[i].dy);
     }
 
-    path.lineTo(segmentPoints.last.dx, chartArea.bottom);
+    path.lineTo(segmentPoints.last.dx, endY);
+    if (lowerPoints != null) {
+      for (int i = lowerPoints.length - 2; i >= 0; i--) {
+        path.lineTo(lowerPoints[i].dx, lowerPoints[i].dy);
+      }
+    }
     path.close();
 
     // Create a gradient paint for the area fill with opacity.
@@ -459,29 +474,41 @@ class AreaChartPainter extends CustomPainter {
   }
 
   /// Maps data points to their visual positions in the chart.
-  List<Offset> _getSeriesPoints(Rect chartArea, AreaChartSeries seriesData) {
+  List<Offset> _getSeriesPoints(Rect chartArea, AreaChartSeries seriesData, {int? seriesIndex}) {
     // If there are no data points, return an empty list.
     if (seriesData.dataPoints.isEmpty) return [];
 
-    // Retrieve the maximum and minimum values from the series data to normalize the points.
-    final maxValue = _getMaxValue();
-    final minValue = _getMinValue();
-    final valueRange = maxValue - minValue;
+    final resolvedSeriesIndex = seriesIndex ?? series.indexOf(seriesData);
+    if (resolvedSeriesIndex == -1) return [];
 
     // Generate a list of points representing the chart's data. Each point is calculated
     // by mapping the data value to the Y-coordinate within the chart area.
-    final slots = style.xSpanSlots ?? seriesData.dataPoints.length;
-    final count = seriesData.dataPoints.length < slots ? seriesData.dataPoints.length : slots;
+    final count = _getRenderedPointCount(seriesData);
     return List.generate(count, (i) {
       final x = _getXCoordinate(
         chartArea,
         i,
         seriesData.dataPoints.length,
       ); // X position
-      final normalizedValue = (seriesData.dataPoints[i].value - minValue) / valueRange; // Normalize Y value
-      final y = chartArea.bottom - (normalizedValue * chartArea.height); // Y position
+      final value = style.stacked ? _getStackedValue(resolvedSeriesIndex, i) : seriesData.dataPoints[i].value;
+      final y = _mapValueToY(chartArea, value); // Y position
       return Offset(x, y); // Return the computed coordinate
     });
+  }
+
+  List<Offset> _getSeriesLowerBoundaryPoints(Rect chartArea, int seriesIndex) {
+    final seriesData = series[seriesIndex];
+    final count = _getRenderedPointCount(seriesData);
+    return List.generate(count, (i) {
+      final x = _getXCoordinate(chartArea, i, seriesData.dataPoints.length);
+      final y = _mapValueToY(chartArea, _getStackedValue(seriesIndex + 1, i));
+      return Offset(x, y);
+    });
+  }
+
+  int _getRenderedPointCount(AreaChartSeries seriesData) {
+    final slots = style.xSpanSlots;
+    return slots == null ? seriesData.dataPoints.length : min(seriesData.dataPoints.length, slots);
   }
 
   double _getXCoordinate(Rect chartArea, int index, int totalPoints) {
@@ -493,32 +520,72 @@ class AreaChartPainter extends CustomPainter {
     return chartArea.left + (chartArea.width / denom) * index;
   }
 
-  double _getMaxValue() {
-    // Finds the maximum value across all series within the effective slot window.
-    final slots = style.xSpanSlots;
-    final values = <double>[];
-    for (final s in series) {
-      final takeCount = slots == null ? s.dataPoints.length : min(s.dataPoints.length, slots);
-      if (takeCount > 0) {
-        values.addAll(s.dataPoints.take(takeCount).map((p) => p.value));
+  double _getStackedValue(int startSeriesIndex, int pointIndex) {
+    double total = 0.0;
+    for (int i = startSeriesIndex; i < series.length; i++) {
+      final seriesData = series[i];
+      if (pointIndex < _getRenderedPointCount(seriesData)) {
+        total += seriesData.dataPoints[pointIndex].value;
       }
     }
-    return values.reduce(max);
+    return total;
+  }
+
+  double _mapValueToY(Rect chartArea, double value) {
+    final maxValue = _getMaxValue();
+    final minValue = _getMinValue();
+    final valueRange = maxValue - minValue;
+    if (valueRange == 0) {
+      return chartArea.top + chartArea.height / 2;
+    }
+    final normalizedValue = (value - minValue) / valueRange;
+    return chartArea.bottom - (normalizedValue * chartArea.height);
+  }
+
+  double _getMaxValue() {
+    final values = _collectVisibleValues();
+    return values.isEmpty ? 0.0 : values.reduce(max);
   }
 
   double _getMinValue() {
     // Finds the minimum value across all series within the effective slot window.
     // Forces the Y-axis to start from zero if specified in the style.
     if (style.forceYAxisFromZero) return 0;
-    final slots = style.xSpanSlots;
-    final values = <double>[];
+    final values = _collectVisibleValues();
+    return values.isEmpty ? 0.0 : values.reduce(min);
+  }
+
+  List<double> _collectVisibleValues() {
+    if (!style.stacked) {
+      final values = <double>[];
+      for (final s in series) {
+        final takeCount = _getRenderedPointCount(s);
+        if (takeCount > 0) {
+          values.addAll(s.dataPoints.take(takeCount).map((p) => p.value));
+        }
+      }
+      return values;
+    }
+
+    final values = <double>[0.0];
+    int maxCount = 0;
     for (final s in series) {
-      final takeCount = slots == null ? s.dataPoints.length : min(s.dataPoints.length, slots);
-      if (takeCount > 0) {
-        values.addAll(s.dataPoints.take(takeCount).map((p) => p.value));
+      maxCount = max(maxCount, _getRenderedPointCount(s));
+    }
+
+    for (int pointIndex = 0; pointIndex < maxCount; pointIndex++) {
+      double cumulative = 0.0;
+      values.add(cumulative);
+      for (int seriesIndex = series.length - 1; seriesIndex >= 0; seriesIndex--) {
+        final seriesData = series[seriesIndex];
+        if (pointIndex < _getRenderedPointCount(seriesData)) {
+          cumulative += seriesData.dataPoints[pointIndex].value;
+          values.add(cumulative);
+        }
       }
     }
-    return values.reduce(min);
+
+    return values;
   }
 
   /// Retrieves the value represented at the specified position within the chart.

@@ -1,4 +1,3 @@
-
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -35,6 +34,8 @@ class HybridChartSvgOptions {
 }
 
 class HybridChartSvgExporter {
+  bool _usesStackedArea(HybridChartStyle style, HybridChartType chartType) => chartType == HybridChartType.area && style.stacked;
+
   String exportSvg({
     required Size size,
     required List<HybridChartSeries> series,
@@ -222,7 +223,7 @@ class HybridChartSvgExporter {
       if (index < 0 || index >= dataPoints.length) continue;
       double x;
       if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
-        final points = _getAreaChartPoints(area, series, series.first, style);
+        final points = _getAreaChartPoints(area, series, series.first, style, chartType: chartType, seriesIndex: 0);
         if (index >= points.length) continue;
         x = points[index].dx;
       } else {
@@ -244,10 +245,11 @@ class HybridChartSvgExporter {
   ) {
     final sb = StringBuffer();
     final skipFill = chartType != HybridChartType.area;
-    for (int i = 0; i < series.length; i++) {
+    final seriesIndices = _usesStackedArea(style, chartType) ? List<int>.generate(series.length, (i) => series.length - 1 - i) : List<int>.generate(series.length, (i) => i);
+    for (final i in seriesIndices) {
       final seriesData = series[i];
       final color = seriesData.color ?? style.colors[i % style.colors.length];
-      final points = _getAreaChartPoints(area, series, seriesData, style);
+      final points = _getAreaChartPoints(area, series, seriesData, style, chartType: chartType, seriesIndex: i);
       if (points.isEmpty) continue;
 
       if (!skipFill) {
@@ -257,7 +259,8 @@ class HybridChartSvgExporter {
           color.withValues(alpha: style.areaFillOpacityTop.clamp(0.0, 1.0)),
           color.withValues(alpha: style.areaFillOpacityBottom.clamp(0.0, 1.0)),
         ));
-        final path = _areaFillPath(area, points);
+        final lowerBoundaryPoints = _usesStackedArea(style, chartType) ? _getAreaChartLowerBoundaryPoints(area, series, style, chartType, i) : null;
+        final path = _areaFillPath(area, points, lowerBoundaryPoints);
         sb.writeln('<path d="$path" fill="url(#$gradientId)" stroke="none" />');
       }
 
@@ -344,7 +347,7 @@ class HybridChartSvgExporter {
         final verticalOffset = keyEvent.verticalOffset ?? config.verticalOffset;
 
         if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
-          final points = _getAreaChartPoints(area, series, seriesData, style);
+          final points = _getAreaChartPoints(area, series, seriesData, style, chartType: chartType, seriesIndex: seriesIdx);
           if (i >= points.length) continue;
           final x = points[i].dx;
           final y = points[i].dy - verticalOffset;
@@ -371,10 +374,10 @@ class HybridChartSvgExporter {
     double maxValue;
 
     if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
-      final allValues = series.expand((s) => s.dataPoints.map((d) => d.value));
+      final allValues = _collectVisibleValues(series, style, chartType);
       final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
-      maxValue = (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a > b ? a : b)) + maxOffset;
-      minValue = style.forceYAxisFromZero ? 0.0 : (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a < b ? a : b));
+      maxValue = (allValues.isEmpty ? 0.0 : allValues.reduce((a, b) => a > b ? a : b)) + maxOffset;
+      minValue = style.forceYAxisFromZero ? 0.0 : (allValues.isEmpty ? 0.0 : allValues.reduce((a, b) => a < b ? a : b));
     } else {
       return '';
     }
@@ -434,13 +437,11 @@ class HybridChartSvgExporter {
       final data = dataPoints[i];
       if (data.labelDisplay == HybridChartLabelDisplay.forceHide) continue;
 
-      final points = _getAreaChartPoints(area, series, series.first, style);
+      final points = _getAreaChartPoints(area, series, series.first, style, chartType: chartType, seriesIndex: 0);
       if (i >= points.length) continue;
       final x = points[i].dx;
 
-      final labelY = axisConfig.xAxisPosition == XAxisPosition.top
-          ? (area.top - style.xAxisLabelGap)
-          : (area.bottom + style.xAxisLabelGap);
+      final labelY = axisConfig.xAxisPosition == XAxisPosition.top ? (area.top - style.xAxisLabelGap) : (area.bottom + style.xAxisLabelGap);
       labels.add(_text(data.label, x, labelY, textStyle, anchor: 'middle', dominantBaseline: axisConfig.xAxisPosition == XAxisPosition.top ? 'auto' : 'hanging'));
     }
 
@@ -454,9 +455,7 @@ class HybridChartSvgExporter {
     if (style.xAxisTitle != null && style.xAxisTitle!.isNotEmpty) {
       final titleStyle = style.xAxisTitleStyle ?? textStyle.copyWith(fontWeight: FontWeight.bold);
       final x = area.left + area.width / 2;
-      final y = axisConfig.xAxisPosition == XAxisPosition.top
-          ? (area.top - style.xAxisTitleGap)
-          : (area.bottom + style.xAxisTitleGap);
+      final y = axisConfig.xAxisPosition == XAxisPosition.top ? (area.top - style.xAxisTitleGap) : (area.bottom + style.xAxisTitleGap);
       items.add(_text(style.xAxisTitle!, x, y, titleStyle, anchor: 'middle', dominantBaseline: axisConfig.xAxisPosition == XAxisPosition.top ? 'auto' : 'hanging'));
     }
 
@@ -495,30 +494,74 @@ class HybridChartSvgExporter {
     return items.join('\n');
   }
 
-  List<Offset> _getAreaChartPoints(
-    Rect chartArea,
-    List<HybridChartSeries> allSeries,
-    HybridChartSeries seriesData,
-    HybridChartStyle style,
-  ) {
+  List<Offset> _getAreaChartPoints(Rect chartArea, List<HybridChartSeries> allSeries, HybridChartSeries seriesData, HybridChartStyle style, {required HybridChartType chartType, int? seriesIndex}) {
     if (seriesData.dataPoints.isEmpty) return [];
 
+    final resolvedSeriesIndex = seriesIndex ?? allSeries.indexOf(seriesData);
+    if (resolvedSeriesIndex == -1) return [];
+
     final dataPoints = seriesData.dataPoints;
-    final allValues = allSeries.expand((s) => s.dataPoints.map((d) => d.value));
-    final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
-    final maxValue = allValues.reduce((a, b) => a > b ? a : b) + maxOffset;
-    final minValue = style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
-    final valueRange = maxValue - minValue;
 
     final slots = style.xSpanSlots ?? dataPoints.length;
     final count = dataPoints.length < slots ? dataPoints.length : slots;
 
     return List.generate(count, (i) {
       final x = _getXCoordinate(chartArea, i, dataPoints.length, style);
-      final normalizedValue = (dataPoints[i].value - minValue) / valueRange;
-      final y = chartArea.bottom - (normalizedValue * chartArea.height);
+      final value = _usesStackedArea(style, chartType) ? _getStackedValue(allSeries, resolvedSeriesIndex, i, style) : dataPoints[i].value;
+      final y = _mapAreaValueToY(chartArea, value, allSeries, style, chartType);
       return Offset(x, y);
     });
+  }
+
+  List<Offset> _getAreaChartLowerBoundaryPoints(
+    Rect chartArea,
+    List<HybridChartSeries> allSeries,
+    HybridChartStyle style,
+    HybridChartType chartType,
+    int seriesIndex,
+  ) {
+    final seriesData = allSeries[seriesIndex];
+    final count = _getRenderedPointCount(seriesData, style);
+    return List.generate(count, (i) {
+      final x = _getXCoordinate(chartArea, i, seriesData.dataPoints.length, style);
+      final y = _mapAreaValueToY(chartArea, _getStackedValue(allSeries, seriesIndex + 1, i, style), allSeries, style, chartType);
+      return Offset(x, y);
+    });
+  }
+
+  int _getRenderedPointCount(HybridChartSeries seriesData, HybridChartStyle style) {
+    final slots = style.xSpanSlots;
+    return slots == null ? seriesData.dataPoints.length : min(seriesData.dataPoints.length, slots);
+  }
+
+  double _getStackedValue(List<HybridChartSeries> allSeries, int startSeriesIndex, int pointIndex, HybridChartStyle style) {
+    double total = 0.0;
+    for (int i = startSeriesIndex; i < allSeries.length; i++) {
+      final seriesData = allSeries[i];
+      if (pointIndex < _getRenderedPointCount(seriesData, style)) {
+        total += seriesData.dataPoints[pointIndex].value;
+      }
+    }
+    return total;
+  }
+
+  double _mapAreaValueToY(
+    Rect chartArea,
+    double value,
+    List<HybridChartSeries> allSeries,
+    HybridChartStyle style,
+    HybridChartType chartType,
+  ) {
+    final visibleValues = _collectVisibleValues(allSeries, style, chartType);
+    final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+    final maxValue = (visibleValues.isEmpty ? 0.0 : visibleValues.reduce((a, b) => a > b ? a : b)) + maxOffset;
+    final minValue = style.forceYAxisFromZero ? 0.0 : (visibleValues.isEmpty ? 0.0 : visibleValues.reduce((a, b) => a < b ? a : b));
+    final valueRange = maxValue - minValue;
+    if (valueRange == 0) {
+      return chartArea.top + chartArea.height / 2;
+    }
+    final normalizedValue = (value - minValue) / valueRange;
+    return chartArea.bottom - (normalizedValue * chartArea.height);
   }
 
   double _getXCoordinate(Rect chartArea, int index, int totalPoints, HybridChartStyle style) {
@@ -527,14 +570,46 @@ class HybridChartSvgExporter {
     return chartArea.left + (chartArea.width / denom) * index;
   }
 
-  String _areaFillPath(Rect area, List<Offset> points) {
+  List<double> _collectVisibleValues(List<HybridChartSeries> allSeries, HybridChartStyle style, HybridChartType chartType) {
+    if (!_usesStackedArea(style, chartType)) {
+      return allSeries.expand((seriesData) {
+        final count = _getRenderedPointCount(seriesData, style);
+        return seriesData.dataPoints.take(count).map((point) => point.value);
+      }).toList();
+    }
+
+    final values = <double>[0.0];
+    final maxCount = allSeries.fold<int>(0, (currentMax, seriesData) => max(currentMax, _getRenderedPointCount(seriesData, style)));
+
+    for (int pointIndex = 0; pointIndex < maxCount; pointIndex++) {
+      double cumulative = 0.0;
+      values.add(cumulative);
+      for (int seriesIndex = allSeries.length - 1; seriesIndex >= 0; seriesIndex--) {
+        final seriesData = allSeries[seriesIndex];
+        if (pointIndex < _getRenderedPointCount(seriesData, style)) {
+          cumulative += seriesData.dataPoints[pointIndex].value;
+          values.add(cumulative);
+        }
+      }
+    }
+
+    return values;
+  }
+
+  String _areaFillPath(Rect area, List<Offset> points, List<Offset>? lowerBoundaryPoints) {
     final sb = StringBuffer();
-    sb.write('M ${points.first.dx} ${area.bottom} ');
+    sb.write('M ${points.first.dx} ${lowerBoundaryPoints?.first.dy ?? area.bottom} ');
     sb.write('L ${points.first.dx} ${points.first.dy} ');
     for (int i = 1; i < points.length; i++) {
       sb.write('L ${points[i].dx} ${points[i].dy} ');
     }
-    sb.write('L ${points.last.dx} ${area.bottom} Z');
+    sb.write('L ${points.last.dx} ${lowerBoundaryPoints?.last.dy ?? area.bottom} ');
+    if (lowerBoundaryPoints != null) {
+      for (int i = lowerBoundaryPoints.length - 2; i >= 0; i--) {
+        sb.write('L ${lowerBoundaryPoints[i].dx} ${lowerBoundaryPoints[i].dy} ');
+      }
+    }
+    sb.write('Z');
     return sb.toString();
   }
 
@@ -612,9 +687,6 @@ class HybridChartSvgExporter {
   }
 
   String _escape(String value) {
-    return value
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;');
+    return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   }
 }

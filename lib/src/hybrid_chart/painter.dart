@@ -37,6 +37,8 @@ class HybridChartPainter extends CustomPainter {
     this.hoverPointScale = 1.5,
   });
 
+  bool get _usesStackedArea => chartType == HybridChartType.area && style.stacked;
+
   @override
   void paint(Canvas canvas, Size size) {
     if (series.isEmpty || series[0].dataPoints.isEmpty) return;
@@ -255,9 +257,9 @@ class HybridChartPainter extends CustomPainter {
   }
 
   void _drawAreaChart(Canvas canvas, Rect chartArea, {bool skipFill = false, bool singleSeries = false}) {
-    final seriesToDraw = singleSeries ? series.sublist(0, 1) : series;
-    for (int seriesIdx = 0; seriesIdx < seriesToDraw.length; seriesIdx++) {
-      final seriesData = seriesToDraw[seriesIdx];
+    final seriesIndices = singleSeries ? <int>[0] : (_usesStackedArea ? List<int>.generate(series.length, (i) => series.length - 1 - i) : List<int>.generate(series.length, (i) => i));
+    for (final seriesIdx in seriesIndices) {
+      final seriesData = series[seriesIdx];
       final color = seriesData.color ?? style.colors[seriesIdx % style.colors.length];
       final topFill = color.withValues(alpha: style.areaFillOpacityTop.clamp(0.0, 1.0));
       final bottomFill = color.withValues(alpha: style.areaFillOpacityBottom.clamp(0.0, 1.0));
@@ -280,7 +282,6 @@ class HybridChartPainter extends CustomPainter {
         final indices = segmentGroups[segmentOrder]!;
         if (indices.isEmpty) continue;
 
-  
         final contiguousRuns = _splitContiguousRuns(indices);
 
         final hasSegmentConfig = style.segmentAnimationConfigs.containsKey(segmentOrder);
@@ -294,6 +295,7 @@ class HybridChartPainter extends CustomPainter {
               _drawSegmentGroup(
                 canvas,
                 chartArea,
+                seriesIdx,
                 seriesData,
                 runIndices,
                 color,
@@ -309,6 +311,7 @@ class HybridChartPainter extends CustomPainter {
               _drawSegmentGroup(
                 canvas,
                 chartArea,
+                seriesIdx,
                 seriesData,
                 runIndices,
                 color,
@@ -351,6 +354,7 @@ class HybridChartPainter extends CustomPainter {
   void _drawSegmentGroup(
     Canvas canvas,
     Rect chartArea,
+    int seriesIndex,
     HybridChartSeries seriesData,
     List<int> indices,
     Color color,
@@ -361,7 +365,7 @@ class HybridChartPainter extends CustomPainter {
     bool useSeriesAnimation = false,
     bool skipFill = false,
   }) {
-    final points = _getAreaChartPoints(chartArea, seriesData);
+    final points = _getAreaChartPoints(chartArea, seriesData, seriesIndex: seriesIndex);
     if (points.isEmpty || indices.isEmpty) return;
 
     int startIdx = indices.first.clamp(0, points.length - 1);
@@ -374,6 +378,7 @@ class HybridChartPainter extends CustomPainter {
     if (startIdx >= points.length || endIdx >= points.length || startIdx > endIdx) return;
 
     final segmentPoints = points.sublist(startIdx, endIdx + 1);
+    final lowerBoundaryPoints = _usesStackedArea ? _getAreaChartLowerBoundaryPoints(chartArea, seriesIndex).sublist(startIdx, endIdx + 1) : null;
     if (segmentPoints.length < 2) return;
 
     double opacity = 1.0;
@@ -415,7 +420,7 @@ class HybridChartPainter extends CustomPainter {
     }
 
     if (!skipFill && segmentPoints.length >= 2) {
-      _drawAreaFill(canvas, chartArea, segmentPoints, topFill, bottomFill, progress, opacity, shouldDrawProgressively);
+      _drawAreaFill(canvas, chartArea, segmentPoints, lowerBoundaryPoints, topFill, bottomFill, progress, opacity, shouldDrawProgressively);
     }
 
     _drawAreaLine(canvas, segmentPoints, seriesData, color, progress, opacity, shouldDrawProgressively);
@@ -499,6 +504,7 @@ class HybridChartPainter extends CustomPainter {
     Canvas canvas,
     Rect chartArea,
     List<Offset> points,
+    List<Offset>? lowerBoundaryPoints,
     Color topColor,
     Color bottomColor,
     double progress,
@@ -508,14 +514,23 @@ class HybridChartPainter extends CustomPainter {
     if (points.isEmpty) return;
 
     final path = Path();
-    path.moveTo(points.first.dx, chartArea.bottom);
+    final lowerPoints = lowerBoundaryPoints;
+    final startY = lowerPoints?.first.dy ?? chartArea.bottom;
+    final endY = lowerPoints?.last.dy ?? chartArea.bottom;
+
+    path.moveTo(points.first.dx, startY);
     path.lineTo(points.first.dx, points.first.dy);
 
     for (int i = 1; i < points.length; i++) {
       path.lineTo(points[i].dx, points[i].dy);
     }
 
-    path.lineTo(points.last.dx, chartArea.bottom);
+    path.lineTo(points.last.dx, endY);
+    if (lowerPoints != null) {
+      for (int i = lowerPoints.length - 2; i >= 0; i--) {
+        path.lineTo(lowerPoints[i].dx, lowerPoints[i].dy);
+      }
+    }
     path.close();
 
     final paint = Paint()
@@ -632,29 +647,96 @@ class HybridChartPainter extends CustomPainter {
     return null;
   }
 
-  List<Offset> _getAreaChartPoints(Rect chartArea, HybridChartSeries seriesData) {
+  List<Offset> _getAreaChartPoints(Rect chartArea, HybridChartSeries seriesData, {int? seriesIndex}) {
     if (seriesData.dataPoints.isEmpty) return [];
 
+    final resolvedSeriesIndex = seriesIndex ?? series.indexOf(seriesData);
+    if (resolvedSeriesIndex == -1) return [];
+
     final dataPoints = seriesData.dataPoints;
-    if (dataPoints.isEmpty) return [];
-
-    // Calculate min and max values using the series' reported `value` (area chart uses `value`)
-    final allValues = series.expand((s) => s.dataPoints.map((d) => d.value));
-    final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
-    final maxValue = allValues.reduce((a, b) => a > b ? a : b) + maxOffset;
-    final minValue = style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
-    final valueRange = maxValue - minValue;
-
-    // Use xSpanSlots if defined to spread points across total slots
-    final slots = style.xSpanSlots ?? dataPoints.length;
-    final count = dataPoints.length < slots ? dataPoints.length : slots;
+    final count = _getRenderedPointCount(seriesData);
 
     return List.generate(count, (i) {
       final x = _getXCoordinate(chartArea, i, dataPoints.length);
-      final normalizedValue = (dataPoints[i].value - minValue) / valueRange;
-      final y = chartArea.bottom - (normalizedValue * chartArea.height);
+      final value = _usesStackedArea ? _getStackedValue(resolvedSeriesIndex, i) : dataPoints[i].value;
+      final y = _mapAreaValueToY(chartArea, value);
       return Offset(x, y);
     });
+  }
+
+  List<Offset> _getAreaChartLowerBoundaryPoints(Rect chartArea, int seriesIndex) {
+    final seriesData = series[seriesIndex];
+    final count = _getRenderedPointCount(seriesData);
+    return List.generate(count, (i) {
+      final x = _getXCoordinate(chartArea, i, seriesData.dataPoints.length);
+      final y = _mapAreaValueToY(chartArea, _getStackedValue(seriesIndex + 1, i));
+      return Offset(x, y);
+    });
+  }
+
+  int _getRenderedPointCount(HybridChartSeries seriesData) {
+    final slots = style.xSpanSlots;
+    return slots == null ? seriesData.dataPoints.length : min(seriesData.dataPoints.length, slots);
+  }
+
+  double _getStackedValue(int startSeriesIndex, int pointIndex) {
+    double total = 0.0;
+    for (int i = startSeriesIndex; i < series.length; i++) {
+      final seriesData = series[i];
+      if (pointIndex < _getRenderedPointCount(seriesData)) {
+        total += seriesData.dataPoints[pointIndex].value;
+      }
+    }
+    return total;
+  }
+
+  List<double> _collectAreaVisibleValues() {
+    if (!_usesStackedArea) {
+      return series.expand((seriesData) {
+        final count = _getRenderedPointCount(seriesData);
+        return seriesData.dataPoints.take(count).map((point) => point.value);
+      }).toList();
+    }
+
+    final values = <double>[0.0];
+    final maxCount = series.fold<int>(0, (currentMax, seriesData) => max(currentMax, _getRenderedPointCount(seriesData)));
+
+    for (int pointIndex = 0; pointIndex < maxCount; pointIndex++) {
+      double cumulative = 0.0;
+      values.add(cumulative);
+      for (int seriesIndex = series.length - 1; seriesIndex >= 0; seriesIndex--) {
+        final seriesData = series[seriesIndex];
+        if (pointIndex < _getRenderedPointCount(seriesData)) {
+          cumulative += seriesData.dataPoints[pointIndex].value;
+          values.add(cumulative);
+        }
+      }
+    }
+
+    return values;
+  }
+
+  double _getAreaMinValue() {
+    if (style.forceYAxisFromZero) return 0.0;
+    final values = _collectAreaVisibleValues();
+    return values.isEmpty ? 0.0 : values.reduce(min);
+  }
+
+  double _getAreaMaxValue() {
+    final values = _collectAreaVisibleValues();
+    final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
+    return (values.isEmpty ? 0.0 : values.reduce(max)) + maxOffset;
+  }
+
+  double _mapAreaValueToY(Rect chartArea, double value) {
+    final minValue = _getAreaMinValue();
+    final maxValue = _getAreaMaxValue();
+    final valueRange = maxValue - minValue;
+    if (valueRange == 0) {
+      return chartArea.top + chartArea.height / 2;
+    }
+    final normalizedValue = (value - minValue) / valueRange;
+    return chartArea.bottom - (normalizedValue * chartArea.height);
   }
 
   double _getXCoordinate(Rect chartArea, int index, int totalPoints) {
@@ -685,14 +767,7 @@ class HybridChartPainter extends CustomPainter {
   /// Calculate Y pixel position from a value, accounting for chart type and offset settings
   double _valueToYPixel(double value, Rect chartArea, HybridChartSeries seriesData) {
     if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
-      // Area chart scaling
-      final allValues = series.expand((s) => s.dataPoints.map((d) => d.value));
-      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
-      final maxValue = allValues.reduce((a, b) => a > b ? a : b) + maxOffset;
-      final minValue = style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
-      final valueRange = maxValue - minValue;
-      final normalizedValue = (value - minValue) / valueRange;
-      return chartArea.bottom - (normalizedValue * chartArea.height);
+      return _mapAreaValueToY(chartArea, value);
     } else {
       // Candlestick scaling (use `close` as fallback when OHLC are nullable)
       final high = seriesData.dataPoints.map((d) => d.high ?? d.close).reduce(max);
@@ -836,9 +911,8 @@ class HybridChartPainter extends CustomPainter {
     if (!style.singleCrosshair || style.singleCrosshairOrientation == SingleCrosshairOrientation.horizontal) {
       if ((chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) && series.isNotEmpty) {
         // For area chart, calculate Y value from the chart area
-        final minY = style.forceYAxisFromZero ? 0.0 : series.expand((s) => s.dataPoints.map((d) => d.value)).reduce((a, b) => a < b ? a : b);
-        final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
-        final maxY = series.expand((s) => s.dataPoints.map((d) => d.value)).reduce((a, b) => a > b ? a : b) + maxOffset;
+        final minY = _getAreaMinValue();
+        final maxY = _getAreaMaxValue();
         final normalizedY = ((chartArea.bottom - hoverPosition!.dy) / chartArea.height).clamp(0.0, 1.0);
         yVal = minY + (normalizedY * (maxY - minY));
       } else if (chartType == HybridChartType.candlestick && series.isNotEmpty) {
@@ -1017,15 +1091,13 @@ class HybridChartPainter extends CustomPainter {
     if (series.isEmpty || series[0].dataPoints.isEmpty || style.baseline == null) return;
 
     final config = style.baseline!;
-    final firstValue = series[0].dataPoints.first.value;
+    final firstValue = _usesStackedArea ? _getStackedValue(0, 0) : series[0].dataPoints.first.value;
     final seriesColor = series[0].color ?? style.colors.first;
     final baselineColor = config.color ?? seriesColor;
 
     // Calculate Y position for the first value
-    final allValues = series.expand((s) => s.dataPoints.map((d) => d.value));
-    final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
-    final maxValue = (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a > b ? a : b)) + maxOffset;
-    final minValue = style.forceYAxisFromZero ? 0.0 : (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a < b ? a : b));
+    final maxValue = _getAreaMaxValue();
+    final minValue = _getAreaMinValue();
     final valueRange = maxValue - minValue;
 
     if (valueRange == 0) return;
@@ -1071,10 +1143,8 @@ class HybridChartPainter extends CustomPainter {
     double minValue, maxValue;
 
     if (chartType == HybridChartType.area || chartType == HybridChartType.multiLine || chartType == HybridChartType.line) {
-      final allValues = series.expand((s) => s.dataPoints.map((d) => d.value));
-      final maxOffset = style.yAxisMaxOffset < 0 ? 0.0 : style.yAxisMaxOffset;
-      maxValue = (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a > b ? a : b)) + maxOffset;
-      minValue = style.forceYAxisFromZero ? 0.0 : (allValues.isEmpty ? 0 : allValues.reduce((a, b) => a < b ? a : b));
+      maxValue = _getAreaMaxValue();
+      minValue = _getAreaMinValue();
     } else {
       final allHighs = series[0].dataPoints.map((d) => d.high ?? d.close);
       final allLows = series[0].dataPoints.map((d) => d.low ?? d.close);

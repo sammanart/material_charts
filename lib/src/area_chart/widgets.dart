@@ -136,6 +136,7 @@ class MaterialAreaChart extends StatefulWidget {
       title: overrides.title ?? baseStyle.title,
       xAxisTitle: overrides.xAxisTitle ?? baseStyle.xAxisTitle,
       yAxisTitle: overrides.yAxisTitle ?? baseStyle.yAxisTitle,
+      stacked: overrides.stacked != false ? overrides.stacked : baseStyle.stacked,
     );
   }
 
@@ -427,9 +428,7 @@ class MaterialAreaChartState extends State<MaterialAreaChart> with TickerProvide
       final seriesConfig = widget.series[i].animationConfig;
       final seriesTrigger = seriesConfig?.animationTrigger ?? widget.style.defaultAnimationTrigger;
       final seriesOrder = seriesConfig?.animationOrder ?? 0;
-      if (seriesTrigger == AreaAnimationTrigger.manual &&
-          _manuallyTriggeredOrders.contains(seriesOrder) &&
-          _seriesAnimationProgress[i] < 1.0) {
+      if (seriesTrigger == AreaAnimationTrigger.manual && _manuallyTriggeredOrders.contains(seriesOrder) && _seriesAnimationProgress[i] < 1.0) {
         hasActiveManualSeries = true;
         break;
       }
@@ -760,25 +759,86 @@ class MaterialAreaChartState extends State<MaterialAreaChart> with TickerProvide
   /// replicating the way the data painters are drawn
   List<Offset> _getSeriesPoints(Rect chartArea, AreaChartSeries seriesData) {
     if (seriesData.dataPoints.isEmpty) return [];
+    final seriesIndex = widget.series.indexOf(seriesData);
+    if (seriesIndex == -1) return [];
 
-    final slots = widget.style.xSpanSlots;
-    final allValues = widget.series.expand((s) {
-      final takeCount = slots == null ? s.dataPoints.length : (s.dataPoints.length < slots ? s.dataPoints.length : slots);
-      return s.dataPoints.take(takeCount).map((p) => p.value);
-    });
-    final maxValue = allValues.reduce((a, b) => a > b ? a : b);
-    final minValue = widget.style.forceYAxisFromZero ? 0.0 : allValues.reduce((a, b) => a < b ? a : b);
-    final valueRange = maxValue - minValue;
-
-    final count = slots == null ? seriesData.dataPoints.length : (seriesData.dataPoints.length < slots ? seriesData.dataPoints.length : slots);
+    final count = _getRenderedPointCount(seriesData);
     return List.generate(count, (i) {
-      final slots = widget.style.xSpanSlots ?? seriesData.dataPoints.length;
-      final denom = (slots - 1) <= 0 ? 1 : (slots - 1);
-      final x = chartArea.left + (chartArea.width / denom) * i;
-      final normalizedValue = (seriesData.dataPoints[i].value - minValue) / valueRange;
-      final y = chartArea.bottom - (normalizedValue * chartArea.height);
+      final x = _getXCoordinate(chartArea, i, seriesData.dataPoints.length);
+      final value = widget.style.stacked ? _getStackedValue(seriesIndex, i) : seriesData.dataPoints[i].value;
+      final y = _mapValueToY(chartArea, value);
       return Offset(x, y);
     });
+  }
+
+  int _getRenderedPointCount(AreaChartSeries seriesData) {
+    final slots = widget.style.xSpanSlots;
+    return slots == null ? seriesData.dataPoints.length : math.min(seriesData.dataPoints.length, slots);
+  }
+
+  double _getXCoordinate(Rect chartArea, int index, int totalPoints) {
+    final slots = widget.style.xSpanSlots ?? totalPoints;
+    final denom = (slots - 1) <= 0 ? 1 : (slots - 1);
+    return chartArea.left + (chartArea.width / denom) * index;
+  }
+
+  double _getStackedValue(int seriesIndex, int pointIndex) {
+    double total = 0.0;
+    for (int i = seriesIndex; i < widget.series.length; i++) {
+      final seriesData = widget.series[i];
+      if (pointIndex < _getRenderedPointCount(seriesData)) {
+        total += seriesData.dataPoints[pointIndex].value;
+      }
+    }
+    return total;
+  }
+
+  double _mapValueToY(Rect chartArea, double value) {
+    final maxValue = _getMaxValue();
+    final minValue = _getMinValue();
+    final valueRange = maxValue - minValue;
+    if (valueRange == 0) {
+      return chartArea.top + chartArea.height / 2;
+    }
+    final normalizedValue = (value - minValue) / valueRange;
+    return chartArea.bottom - (normalizedValue * chartArea.height);
+  }
+
+  double _getMaxValue() {
+    final values = _collectVisibleValues();
+    return values.isEmpty ? 0.0 : values.reduce((a, b) => a > b ? a : b);
+  }
+
+  double _getMinValue() {
+    if (widget.style.forceYAxisFromZero) return 0.0;
+    final values = _collectVisibleValues();
+    return values.isEmpty ? 0.0 : values.reduce((a, b) => a < b ? a : b);
+  }
+
+  List<double> _collectVisibleValues() {
+    if (!widget.style.stacked) {
+      return widget.series.expand((seriesData) {
+        final takeCount = _getRenderedPointCount(seriesData);
+        return seriesData.dataPoints.take(takeCount).map((point) => point.value);
+      }).toList();
+    }
+
+    final values = <double>[0.0];
+    final maxCount = widget.series.fold<int>(0, (maxCount, seriesData) => math.max(maxCount, _getRenderedPointCount(seriesData)));
+
+    for (int pointIndex = 0; pointIndex < maxCount; pointIndex++) {
+      double cumulative = 0.0;
+      values.add(cumulative);
+      for (int seriesIndex = widget.series.length - 1; seriesIndex >= 0; seriesIndex--) {
+        final seriesData = widget.series[seriesIndex];
+        if (pointIndex < _getRenderedPointCount(seriesData)) {
+          cumulative += seriesData.dataPoints[pointIndex].value;
+          values.add(cumulative);
+        }
+      }
+    }
+
+    return values;
   }
 }
 
